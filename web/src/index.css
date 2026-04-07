@@ -1,0 +1,243 @@
+@import "tailwindcss";
+
+/* ==================== Design System ==================== */
+
+@theme {
+  /* Brand colors - deep purple to cyan gradient palette */
+  --color-brand-50: oklch(0.97 0.01 280);
+  --color-brand-100: oklch(0.93 0.03 280);
+  --color-brand-200: oklch(0.85 0.06 280);
+  --color-brand-300: oklch(0.75 0.10 280);
+  --color-brand-400: oklch(0.65 0.15 275);
+  --color-brand-500: oklch(0.55 0.20 270);
+  --color-brand-600: oklch(0.48 0.22 270);
+  --color-brand-700: oklch(0.40 0.18 270);
+  --color-brand-800: oklch(0.33 0.14 270);
+  --color-brand-900: oklch(0.25 0.10 270);
+
+  /* Accent - electric cyan */
+  --color-accent-400: oklch(0.80 0.15 195);
+  --color-accent-500: oklch(0.72 0.18 195);
+  --color-accent-600: oklch(0.60 0.16 195);
+
+  /* Success / Danger / Warning */
+  --color-success: oklch(0.72 0.18 155);
+  --color-danger: oklch(0.65 0.20 25);
+  --color-warning: oklch(0.80 0.16 80);
+
+  /* Surface colors - dark mode */
+  --color-surface-0: oklch(0.13 0.02 270);
+  --color-surface-1: oklch(0.17 0.02 270);
+  --color-surface-2: oklch(0.21 0.02 270);
+  --color-surface-3: oklch(0.25 0.02 270);
+  --color-surface-4: oklch(0.30 0.02 270);
+
+  /* Text */
+  --color-text-primary: oklch(0.95 0.01 270);
+  --color-text-secondary: oklch(0.70 0.02 270);
+  --color-text-muted: oklch(0.50 0.02 270);
+
+  /* Border */
+  --color-border: oklch(0.30 0.02 270);
+  --color-border-strong: oklch(0.40 0.03 270);
+
+  /* Fonts */
+  --font-sans: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+
+  /* Radius */
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-full: 9999px;
+}
+
+/* ==================== Global Styles ==================== */
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface-0);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  height: 100dvh;
+}
+
+#root {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ==================== Scrollbar ==================== */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-4);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* ==================== Glassmorphism Utilities ==================== */
+
+.glass {
+  background: oklch(0.17 0.02 270 / 0.7);
+  backdrop-filter: blur(20px) saturate(1.5);
+  border: 1px solid oklch(1 0 0 / 0.06);
+}
+
+.glass-strong {
+  background: oklch(0.20 0.02 270 / 0.85);
+  backdrop-filter: blur(24px) saturate(1.8);
+  border: 1px solid oklch(1 0 0 / 0.1);
+}
+
+/* ==================== Animation ==================== */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px oklch(0.72 0.18 195 / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 16px oklch(0.72 0.18 195 / 0.7);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.35s ease-out both;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out both;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-2) 25%,
+    var(--color-surface-3) 50%,
+    var(--color-surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ==================== Markdown Content ==================== */
+
+.markdown-body {
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.markdown-body p {
+  margin: 0.5em 0;
+}
+
+.markdown-body p:first-child {
+  margin-top: 0;
+}
+
+.markdown-body code {
+  background: var(--color-surface-3);
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-xs);
+  font-size: 0.875em;
+  font-family: var(--font-mono);
+  color: var(--color-accent-400);
+}
+
+.markdown-body pre {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 1em;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: 0.85em;
+}
+
+.markdown-body ul, .markdown-body ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--color-brand-500);
+  margin: 0.75em 0;
+  padding: 0.25em 1em;
+  color: var(--color-text-secondary);
+}
+
+.markdown-body a {
+  color: var(--color-accent-500);
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}

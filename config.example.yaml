@@ -1,0 +1,16 @@
+# BaoMiHua Agent Gateway Configuration
+
+server:
+  port: 3710
+  allowed_origins:
+    - "*"
+
+auth:
+  # Set a token for authentication. Leave empty to disable auth.
+  token: ""
+
+agents:
+  - id: gemini
+    name: "Gemini CLI"
+    command: "gemini"
+    args: ["--acp"]

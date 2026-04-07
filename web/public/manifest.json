@@ -1,0 +1,16 @@
+{
+  "name": "BaoMiHua Agent Gateway",
+  "short_name": "BaoMiHua",
+  "description": "Mobile control hub for AI Coding Agents",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#13051b",
+  "theme_color": "#1a1128",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
