@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { FileEntry, FilesResult } from '../../types/protocol';
 import { getApiBaseUrl, getAuthHeaders } from '../../stores/backendStore';
+import { 
+  Folder, File as FileIcon, FileCode, FileImage, FileText, Database,
+  Terminal, Lock, EyeOff, LayoutTemplate, 
+  X, Home, ArrowUp, ArrowDown, Eye, EyeOff as EyeOffToggle
+} from 'lucide-react';
 
 type SortKey = 'name' | 'size' | 'modTime';
 type SortDir = 'asc' | 'desc';
@@ -10,10 +15,6 @@ interface Props {
   onClose: () => void;
 }
 
-/**
- * FileBrowser 是连接后的文件浏览面板。
- * 展示 Agent 工作目录的文件和子目录，支持排序和浏览。
- */
 export default function FileBrowser({ rootPath, onClose }: Props) {
   const [currentPath, setCurrentPath] = useState(rootPath);
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -61,7 +62,7 @@ export default function FileBrowser({ rootPath, onClose }: Props) {
   }, [rootPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sortedEntries = [...entries].sort((a, b) => {
-    // 目录始终排在文件前面
+    // Directories always come first
     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
 
     let cmp = 0;
@@ -102,6 +103,7 @@ export default function FileBrowser({ rootPath, onClose }: Props) {
   };
 
   const formatSize = (bytes: number): string => {
+    if (bytes === 0) return '--';
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -118,169 +120,236 @@ export default function FileBrowser({ rootPath, onClose }: Props) {
     });
   };
 
-  const getFileIcon = (name: string, isDir: boolean): string => {
-    if (isDir) return '📂';
+  const getFileIcon = (name: string, isDir: boolean) => {
+    if (isDir) return <Folder size={18} className="text-blue-400 group-hover:text-blue-300 transition-colors" fill="currentColor" fillOpacity={0.2} />;
+    
     const ext = name.split('.').pop()?.toLowerCase() || '';
-    const iconMap: Record<string, string> = {
-      ts: '🟦', tsx: '⚛️', js: '🟨', jsx: '⚛️',
-      go: '🐹', py: '🐍', rs: '🦀', rb: '💎',
-      json: '📋', yaml: '📋', yml: '📋', toml: '📋',
-      md: '📝', txt: '📄', html: '🌐', css: '🎨',
-      png: '🖼️', jpg: '🖼️', svg: '🖼️', gif: '🖼️',
-      sh: '⚡', bash: '⚡', zsh: '⚡',
-      lock: '🔒', gitignore: '🙈',
+    
+    const colors = {
+      blue: "text-blue-400",
+      yellow: "text-yellow-400",
+      green: "text-green-400",
+      emerald: "text-emerald-400",
+      red: "text-red-400",
+      slate: "text-slate-400",
+      zinc: "text-zinc-400",
     };
-    return iconMap[ext] || '📄';
+
+    switch (ext) {
+      case 'ts':
+      case 'tsx':
+        return <FileCode size={18} className={colors.blue} />;
+      case 'js':
+      case 'jsx':
+        return <FileCode size={18} className={colors.yellow} />;
+      case 'go':
+      case 'py':
+      case 'rs':
+      case 'rb':
+        return <Terminal size={18} className={colors.emerald} />;
+      case 'json':
+      case 'yaml':
+      case 'yml':
+      case 'toml':
+        return <Database size={18} className={colors.green} />;
+      case 'md':
+      case 'txt':
+        return <FileText size={18} className={colors.slate} />;
+      case 'html':
+      case 'css':
+        return <LayoutTemplate size={18} className={colors.blue} />;
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'svg':
+      case 'gif':
+        return <FileImage size={18} className={colors.yellow} />;
+      case 'sh':
+      case 'bash':
+      case 'zsh':
+        return <Terminal size={18} className={colors.red} />;
+      case 'lock':
+        return <Lock size={18} className={colors.zinc} />;
+      case 'gitignore':
+        return <EyeOff size={18} className={colors.zinc} />;
+      default:
+        return <FileIcon size={18} className={colors.zinc} />;
+    }
   };
 
-  // 计算相对路径
+  const SortButton = ({ sortKey: key, label }: { sortKey: SortKey, label: string }) => {
+    const active = sortKey === key;
+    return (
+      <button
+        onClick={() => toggleSort(key)}
+        className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-all duration-200 cursor-pointer ${
+          active 
+            ? 'bg-[var(--color-surface-3)] text-[var(--color-accent-400)]' 
+            : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]'
+        }`}
+      >
+        <span>{label}</span>
+        {active && (
+          sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+        )}
+      </button>
+    );
+  };
+
   const relativePath = currentPath.startsWith(rootPath)
     ? currentPath.slice(rootPath.length) || '/'
     : currentPath;
 
+  const pathParts = relativePath.split('/').filter(Boolean);
+
   return (
-    <div
-      className="flex flex-col h-full"
-      style={{
-        background: 'var(--color-surface-1)',
-        borderLeft: '1px solid var(--color-border)',
-      }}
-    >
-      {/* Header */}
-      <div
-        className="flex items-center gap-2 px-3 py-2.5 sm:py-2 flex-shrink-0 safe-top"
-        style={{ borderBottom: '1px solid var(--color-border)' }}
-      >
-        <span className="text-sm">📂</span>
-        <span className="text-xs font-medium flex-1 truncate" style={{ color: 'var(--color-text-primary)' }}>
-          Files
-        </span>
-        <button
-          onClick={handleGoRoot}
-          className="p-1.5 sm:p-1 rounded transition-opacity hover:opacity-80 cursor-pointer"
-          style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
-          title="Go to root"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-          </svg>
-        </button>
-        <button
-          onClick={onClose}
-          className="p-1.5 sm:p-1 rounded transition-opacity hover:opacity-80 cursor-pointer"
-          style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
-          title="Close file browser"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Breadcrumb */}
-      <div className="px-3 py-1.5 flex items-center gap-1 flex-shrink-0">
-        <button
-          onClick={handleGoUp}
-          className="p-0.5 rounded hover:opacity-80 transition-opacity cursor-pointer flex-shrink-0"
-          style={{ color: 'var(--color-text-secondary)', background: 'transparent', border: 'none' }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-        </button>
-        <span className="text-xs truncate" style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-          {relativePath}
-        </span>
-      </div>
-
-      {/* Sort toolbar */}
-      <div className="flex items-center gap-1 px-3 py-1 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        {(['name', 'size', 'modTime'] as SortKey[]).map((key) => (
+    <div className="flex flex-col h-full bg-[var(--color-surface-0)] border-l border-[var(--color-border)] select-none">
+      {/* Header Area */}
+      <div className="flex flex-col flex-shrink-0 pt-safe bg-[var(--color-surface-1)] border-b border-[var(--color-border)]">
+        
+        {/* Top Navbar */}
+        <div className="flex items-center gap-2 px-4 py-3 sm:py-2.5">
+          <Folder size={18} className="text-blue-400" fill="currentColor" fillOpacity={0.2} />
+          <span className="text-sm font-semibold flex-1 truncate tracking-wide text-[var(--color-text-primary)]">
+            File Browser
+          </span>
           <button
-            key={key}
-            onClick={() => toggleSort(key)}
-            className="text-xs px-1.5 py-0.5 rounded transition-all cursor-pointer"
-            style={{
-              background: sortKey === key ? 'var(--color-surface-3)' : 'transparent',
-              color: sortKey === key ? 'var(--color-accent-400)' : 'var(--color-text-muted)',
-              border: 'none',
-            }}
+            onClick={handleGoRoot}
+            className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)] transition-all cursor-pointer"
+            title="Go to root"
           >
-            {key === 'name' ? 'Name' : key === 'size' ? 'Size' : 'Date'}
-            {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+            <Home size={16} />
           </button>
-        ))}
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-400/10 transition-all cursor-pointer"
+            title="Close file browser"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Breadcrumb Navigation */}
+        <div className="flex items-center gap-2 px-4 pb-3 sm:pb-2.5">
+          <button
+            onClick={handleGoUp}
+            className="p-1 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)] transition-all cursor-pointer flex-shrink-0"
+            title="Go up one folder"
+          >
+            <ArrowUp size={16} className="-rotate-45" />
+          </button>
+          <div className="flex bg-[var(--color-surface-2)] rounded-md px-3 py-1.5 flex-1 overflow-x-auto no-scrollbar items-center border border-[var(--color-border)]">
+            <span className="text-xs text-[var(--color-text-muted)] font-mono whitespace-nowrap">
+              root
+            </span>
+            {pathParts.map((part, i) => (
+              <div key={i} className="flex items-center whitespace-nowrap">
+                <span className="text-[var(--color-text-muted)] mx-1 text-xs">/</span>
+                <span className="text-xs text-[var(--color-text-primary)] font-mono">{part}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 flex-shrink-0 bg-[var(--color-surface-1)] border-b border-[var(--color-border-strong)]">
+        <SortButton sortKey="name" label="Name" />
+        <SortButton sortKey="size" label="Size" />
+        <SortButton sortKey="modTime" label="Date" />
         <div className="flex-1" />
         <button
           onClick={() => setShowHidden(!showHidden)}
-          className="text-xs px-1.5 py-0.5 rounded transition-all cursor-pointer"
-          style={{
-            background: showHidden ? 'var(--color-surface-3)' : 'transparent',
-            color: showHidden ? 'var(--color-accent-400)' : 'var(--color-text-muted)',
-            border: 'none',
-          }}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all duration-200 cursor-pointer ${
+            showHidden 
+              ? 'bg-[var(--color-surface-3)] text-blue-400' 
+              : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]'
+          }`}
+          title="Toggle hidden files"
         >
-          .*
+          {showHidden ? <Eye size={14} /> : <EyeOffToggle size={14} />}
+          <span className="hidden sm:inline">Hidden</span>
         </button>
       </div>
 
-      {/* File list */}
-      <div className="flex-1 overflow-y-auto">
+      {/* File List */}
+      <div className="flex-1 overflow-y-auto px-2 py-2 no-scrollbar bg-[var(--color-surface-0)] relative">
         {loading && (
-          <div className="flex items-center justify-center py-8">
-            <div className="flex gap-1">
-              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-accent-500)', animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-accent-500)', animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-accent-500)', animationDelay: '300ms' }} />
-            </div>
+          <div className="flex flex-col gap-1.5 animate-pulse-glow">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="w-full flex items-center gap-3 px-3 py-3 rounded-lg bg-[var(--color-surface-1)] border border-[var(--color-border)]">
+                <div className="w-5 h-5 rounded bg-[var(--color-surface-3)]" />
+                <div className="h-4 rounded flex-1 bg-[var(--color-surface-3)] max-w-[150px]" />
+                <div className="h-3 w-12 rounded hidden sm:block bg-[var(--color-surface-3)] ml-auto" />
+              </div>
+            ))}
           </div>
         )}
 
         {error && (
-          <div className="text-xs py-4 px-3 text-center" style={{ color: 'var(--color-danger)' }}>
-            ⚠️ {error}
+          <div className="m-4 p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-center flex flex-col items-center gap-2">
+            <X size={24} className="text-red-400" />
+            <span className="text-sm text-red-400">{error}</span>
           </div>
         )}
 
         {!loading && !error && entries.length === 0 && (
-          <div className="text-xs py-8 text-center" style={{ color: 'var(--color-text-muted)' }}>
-            Empty directory
+          <div className="h-full flex flex-col items-center justify-center text-[var(--color-text-muted)] gap-3">
+            <div className="p-4 rounded-full bg-[var(--color-surface-2)]">
+              <Folder size={32} className="opacity-50" />
+            </div>
+            <span className="text-sm">Empty directory</span>
           </div>
         )}
 
-        {!loading && !error && sortedEntries.map((entry) => (
-          <button
-            key={entry.name}
-            onClick={() => handleNavigate(entry)}
-            className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-1.5 text-left transition-all duration-100 group"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--color-text-primary)',
-              cursor: entry.isDir ? 'pointer' : 'default',
-              opacity: entry.isDir ? 1 : 0.7,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--color-surface-2)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-            }}
-          >
-            <span className="text-xs flex-shrink-0">{getFileIcon(entry.name, entry.isDir)}</span>
-            <span className="text-xs truncate flex-1" style={{ fontFamily: 'var(--font-mono)' }}>
-              {entry.name}
-            </span>
-            <span className="text-xs flex-shrink-0 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-              style={{ color: 'var(--color-text-muted)', fontSize: '0.65rem' }}>
-              {entry.isDir ? '' : formatSize(entry.size)}
-            </span>
-            <span className="text-xs flex-shrink-0 hidden sm:hidden sm:group-hover:inline"
-              style={{ color: 'var(--color-text-muted)', fontSize: '0.65rem' }}>
-              {formatDate(entry.modTime)}
-            </span>
-          </button>
-        ))}
+        {!loading && !error && (
+          <div className="flex flex-col gap-0.5">
+            {sortedEntries.map((entry) => (
+              <button
+                key={entry.name}
+                onClick={() => handleNavigate(entry)}
+                className="group w-full flex items-center gap-3 px-3 py-3 sm:py-2 rounded-lg text-left transition-all duration-150 border border-transparent hover:bg-[var(--color-surface-2)] hover:border-[var(--color-border)] cursor-pointer"
+              >
+                {/* Icon Area */}
+                <div className="flex-shrink-0 flex items-center justify-center">
+                  {getFileIcon(entry.name, entry.isDir)}
+                </div>
+
+                {/* Filename */}
+                <span 
+                  className="text-sm truncate flex-1 font-mono tracking-tight" 
+                  style={{ 
+                    color: entry.isDir ? 'var(--color-text-primary)' : 'var(--color-text-secondary)'
+                  }}
+                >
+                  {entry.name}
+                </span>
+
+                {/* Metadata Area (hidden on very small screens) */}
+                <div className="hidden sm:flex items-center gap-4 flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
+                  {!entry.isDir && (
+                    <span className="text-xs text-[var(--color-text-muted)] font-mono w-16 text-right">
+                      {formatSize(entry.size)}
+                    </span>
+                  )}
+                  {entry.isDir && <span className="w-16" />} {/* Placeholder to align dates */}
+                  
+                  <span className="text-xs text-[var(--color-text-muted)] w-24 text-right">
+                    {formatDate(entry.modTime)}
+                  </span>
+                </div>
+                
+                {/* Chevron indicator for mobile instead of details */}
+                {entry.isDir && (
+                  <div className="sm:hidden text-[var(--color-text-muted)] opacity-50">
+                    <ArrowDown size={14} className="-rotate-90" />
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
