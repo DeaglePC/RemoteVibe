@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import MessageBubble from './MessageBubble';
+import ThinkingBlock from './ThinkingBlock';
 import ToolCallCard from '../Cards/ToolCallCard';
 import CommandConfirmCard from '../Cards/CommandConfirmCard';
 import DiffViewerCard from '../Cards/DiffViewerCard';
@@ -14,6 +15,8 @@ export default function ChatView({ onPermissionRespond }: Props) {
   const toolCalls = useChatStore((s) => s.toolCalls);
   const pendingPermissions = useChatStore((s) => s.pendingPermissions);
   const agentStatus = useChatStore((s) => s.agentStatus);
+  const isThinking = useChatStore((s) => s.isAgentThinking);
+  const thinkingContent = useChatStore((s) => s.thinkingContent);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -21,12 +24,12 @@ export default function ChatView({ onPermissionRespond }: Props) {
   // Auto-scroll to bottom on new content
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, toolCalls, pendingPermissions]);
+  }, [messages, toolCalls, pendingPermissions, thinkingContent]);
 
   const isIdle = agentStatus !== 'running';
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+    <div ref={scrollRef} className="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-4">
       {/* Empty state */}
       {messages.length === 0 && (
         <div className="flex flex-col items-center justify-center h-full text-center">
@@ -55,6 +58,11 @@ export default function ChatView({ onPermissionRespond }: Props) {
       {messages.map((msg, i) => (
         <MessageBubble key={msg.id} message={msg} index={i} />
       ))}
+
+      {/* Thinking block — shows agent's reasoning process in real-time */}
+      {(isThinking || thinkingContent) && (
+        <ThinkingBlock content={thinkingContent} isActive={isThinking} />
+      )}
 
       {/* Active tool calls */}
       {Array.from(toolCalls.values())

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useChatStore, genMessageId } from '../stores/chatStore';
+import { useBackendStore, getWsUrl } from '../stores/backendStore';
 import type {
   ServerMessage,
   AgentStatusPayload,
@@ -11,6 +12,7 @@ import type {
   PlanUpdatePayload,
   ErrorPayload,
   ClientMessage,
+  GeminiSessionsPayload,
 } from '../types/protocol';
 import { MSG } from '../types/protocol';
 
@@ -21,17 +23,20 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(WS_RECONNECT_DELAY);
+  // 标记是否为主动关闭（切换后端/组件卸载），主动关闭时不触发自动重连
+  const intentionalClose = useRef(false);
+
+  // 订阅后端切换，触发重连
+  const activeBackendId = useBackendStore((s) => s.activeBackendId);
 
   const store = useChatStore;
 
   const connect = useCallback(() => {
-    // Build WebSocket URL
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const token = localStorage.getItem('bmh_token') || '';
-    const url = `${protocol}//${host}/ws${token ? `?token=${token}` : ''}`;
+    // 使用 backendStore 构建 WebSocket URL
+    const url = getWsUrl();
 
     store.getState().setWsStatus('connecting');
+    intentionalClose.current = false;
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
@@ -46,7 +51,10 @@ export function useWebSocket() {
       console.log('[WS] Disconnected:', e.code, e.reason);
       store.getState().setWsStatus('disconnected');
       wsRef.current = null;
-      scheduleReconnect();
+      // 主动关闭时不自动重连，避免切换后端时产生多余连接
+      if (!intentionalClose.current) {
+        scheduleReconnect();
+      }
     };
 
     ws.onerror = (e) => {
@@ -99,6 +107,10 @@ export function useWebSocket() {
         if (p.agentId) s.setActiveAgentId(p.agentId);
         if (p.error) s.setLastError(p.error);
         if (p.status === 'running') {
+          // Agent 就绪时重置 thinking 状态，避免恢复会话期间
+          // 收到的 session/update 通知把 isAgentThinking 置为 true 后无法恢复
+          s.setIsAgentThinking(false);
+          s.clearThinkingContent();
           s.addMessage({
             id: genMessageId(),
             role: 'system',
@@ -112,14 +124,34 @@ export function useWebSocket() {
             content: `❌ Agent error: ${p.error}`,
             timestamp: Date.now(),
           });
+        } else if (p.status === 'stopped' || p.status === 'disconnected') {
+          s.setShowFileBrowser(false);
+          // Agent 停止或断开时，确保退出 thinking 状态
+          s.setIsAgentThinking(false);
+          s.clearThinkingContent();
+          s.addMessage({
+            id: genMessageId(),
+            role: 'system',
+            content: `⏹️ Agent ${p.status}.`,
+            timestamp: Date.now(),
+          });
         }
         break;
       }
 
       case MSG.MESSAGE_CHUNK: {
         const p = msg.payload as MessageChunkPayload;
-        s.setIsAgentThinking(true);
+        // 注意：不在这里设 setIsAgentThinking(true)
+        // thinking 状态由发送 prompt（App.tsx handleSendPrompt）和 THOUGHT_CHUNK 触发，
+        // 避免恢复会话时 Gemini CLI 的历史摘要 notification 误触发 thinking 状态
         s.appendToLastAgentMessage(p.text);
+        break;
+      }
+
+      case MSG.THOUGHT_CHUNK: {
+        const p = msg.payload as MessageChunkPayload;
+        s.setIsAgentThinking(true);
+        s.appendThinkingContent(p.text);
         break;
       }
 
@@ -143,6 +175,7 @@ export function useWebSocket() {
 
       case MSG.TURN_COMPLETE: {
         s.setIsAgentThinking(false);
+        s.clearThinkingContent();
         break;
       }
 
@@ -163,17 +196,38 @@ export function useWebSocket() {
         });
         break;
       }
+
+      case MSG.GEMINI_SESSIONS: {
+        const p = msg.payload as GeminiSessionsPayload;
+        s.setGeminiSessions(p.sessions || []);
+        break;
+      }
     }
   };
 
-  // Connect on mount
+  // 安全关闭当前连接
+  const closeCurrentConnection = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+    if (wsRef.current) {
+      intentionalClose.current = true;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+  }, []);
+
+  // Connect on mount, and reconnect when backend changes
   useEffect(() => {
+    closeCurrentConnection();
+    reconnectDelay.current = WS_RECONNECT_DELAY;
     connect();
+
     return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
+      closeCurrentConnection();
     };
-  }, [connect]);
+  }, [connect, closeCurrentConnection, activeBackendId]); // activeBackendId 变化时重连
 
   return { send };
 }

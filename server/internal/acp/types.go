@@ -102,11 +102,25 @@ type InitializeResult struct {
 
 // ==================== ACP Session ====================
 
+// SessionNewParams 是 session/new 请求的参数
 type SessionNewParams struct {
-	// Empty for now, can add workspace info later
+	Cwd        string        `json:"cwd"`
+	McpServers []interface{} `json:"mcpServers"`
 }
 
 type SessionNewResult struct {
+	SessionID string `json:"sessionId"`
+}
+
+// SessionLoadParams 是 session/load 请求的参数，用于恢复 Gemini CLI 原生会话
+type SessionLoadParams struct {
+	SessionID  string        `json:"sessionId"`
+	Cwd        string        `json:"cwd"`
+	McpServers []interface{} `json:"mcpServers"`
+}
+
+// SessionLoadResult 是 session/load 请求的响应
+type SessionLoadResult struct {
 	SessionID string `json:"sessionId"`
 }
 
@@ -141,6 +155,12 @@ type SessionUpdateType struct {
 // AgentMessageChunk is a streaming text chunk from the agent
 type AgentMessageChunk struct {
 	SessionUpdate string       `json:"sessionUpdate"` // "agent_message_chunk"
+	Content       ContentBlock `json:"content"`
+}
+
+// AgentThoughtChunk is a streaming thought/reasoning chunk from the agent
+type AgentThoughtChunk struct {
+	SessionUpdate string       `json:"sessionUpdate"` // "agent_thought_chunk"
 	Content       ContentBlock `json:"content"`
 }
 

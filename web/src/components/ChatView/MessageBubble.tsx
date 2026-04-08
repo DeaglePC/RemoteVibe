@@ -39,7 +39,7 @@ export default function MessageBubble({ message, index }: Props) {
       style={{ animationDelay: `${index * 30}ms` }}
     >
       <div
-        className={`max-w-[88%] rounded-2xl px-4 py-3 ${isUser ? 'rounded-br-md' : 'rounded-bl-md'}`}
+        className={`max-w-[95%] sm:max-w-[88%] rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 ${isUser ? 'rounded-br-md' : 'rounded-bl-md'}`}
         style={{
           background: isUser
             ? 'linear-gradient(135deg, var(--color-brand-600), var(--color-brand-500))'

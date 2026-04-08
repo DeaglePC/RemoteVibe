@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Client implements the ACP Client side of the protocol.
@@ -21,6 +24,7 @@ type Client struct {
 
 	// Event callbacks (set by the caller)
 	OnMessageChunk    func(chunk *AgentMessageChunk)
+	OnThoughtChunk    func(chunk *AgentThoughtChunk)
 	OnToolCall        func(tc *ToolCall)
 	OnToolCallUpdate  func(tcu *ToolCallStatusUpdate)
 	OnPlanUpdate      func(plan *PlanUpdate)
@@ -28,8 +32,9 @@ type Client struct {
 	OnTurnComplete    func(result *SessionPromptResult)
 	OnDisconnect      func(err error)
 
-	sessionID string
-	done      chan struct{}
+	sessionID          string
+	supportsLoadSession bool // Agent 是否支持 session/load（从 initialize 响应中获取）
+	done               chan struct{}
 }
 
 // NewClient creates a new ACP client over the given reader/writer
@@ -93,15 +98,27 @@ func (c *Client) Initialize() (*InitializeResult, error) {
 		return nil, fmt.Errorf("parse initialize result: %w", err)
 	}
 
-	log.Printf("[ACP] Connected to agent: %s v%s (protocol v%d)",
-		initResult.AgentInfo.Name, initResult.AgentInfo.Version, initResult.ProtocolVersion)
+	c.supportsLoadSession = initResult.AgentCapabilities.LoadSession
+
+	log.Printf("[ACP] Connected to agent: %s v%s (protocol v%d, loadSession=%v)",
+		initResult.AgentInfo.Name, initResult.AgentInfo.Version, initResult.ProtocolVersion,
+		c.supportsLoadSession)
 
 	return &initResult, nil
 }
 
+// SupportsLoadSession 返回 Agent 是否支持 session/load 恢复会话
+func (c *Client) SupportsLoadSession() bool {
+	return c.supportsLoadSession
+}
+
 // SessionNew creates a new conversation session
-func (c *Client) SessionNew() (string, error) {
-	result, err := c.sendRequest("session/new", struct{}{})
+func (c *Client) SessionNew(cwd string) (string, error) {
+	params := SessionNewParams{
+		Cwd:        cwd,
+		McpServers: []interface{}{},
+	}
+	result, err := c.sendRequest("session/new", params)
 	if err != nil {
 		return "", fmt.Errorf("session/new: %w", err)
 	}
@@ -113,6 +130,40 @@ func (c *Client) SessionNew() (string, error) {
 
 	c.sessionID = sessionResult.SessionID
 	log.Printf("[ACP] Session created: %s", c.sessionID)
+	return c.sessionID, nil
+}
+
+// SessionLoad 恢复一个已有的 Gemini CLI 会话
+func (c *Client) SessionLoad(sessionID string, cwd string) (string, error) {
+	if !c.supportsLoadSession {
+		return "", fmt.Errorf("agent does not support session/load")
+	}
+
+	params := SessionLoadParams{
+		SessionID:  sessionID,
+		Cwd:        cwd,
+		McpServers: []interface{}{},
+	}
+	result, err := c.sendRequest("session/load", params)
+	if err != nil {
+		return "", fmt.Errorf("session/load: %w", err)
+	}
+
+	log.Printf("[ACP] session/load raw result: %s", string(result))
+
+	var loadResult SessionLoadResult
+	if err := json.Unmarshal(result, &loadResult); err != nil {
+		return "", fmt.Errorf("parse session/load result: %w", err)
+	}
+
+	// 如果响应中 sessionId 为空，使用请求中的 sessionID 作为 fallback
+	if loadResult.SessionID == "" {
+		log.Printf("[ACP] session/load returned empty sessionId, using request sessionID: %s", sessionID)
+		loadResult.SessionID = sessionID
+	}
+
+	c.sessionID = loadResult.SessionID
+	log.Printf("[ACP] Session loaded, active sessionID: %s", c.sessionID)
 	return c.sessionID, nil
 }
 
@@ -144,6 +195,10 @@ func (c *Client) SendPrompt(text string) error {
 		var promptResult SessionPromptResult
 		if err := json.Unmarshal(result, &promptResult); err != nil {
 			log.Printf("[ACP] Parse prompt result error: %v", err)
+			// 解析失败也要触发 turn_complete，否则前端会一直卡在 thinking 状态
+			if c.OnTurnComplete != nil {
+				c.OnTurnComplete(&SessionPromptResult{StopReason: "error"})
+			}
 			return
 		}
 
@@ -195,6 +250,9 @@ func (c *Client) Cancel() error {
 
 // ==================== Internal ====================
 
+// sendRequestTimeout 是 session/prompt 等请求的默认超时时间
+const sendRequestTimeout = 5 * time.Minute
+
 func (c *Client) sendRequest(method string, params interface{}) (json.RawMessage, error) {
 	id := c.nextID.Add(1)
 
@@ -212,7 +270,7 @@ func (c *Client) sendRequest(method string, params interface{}) (json.RawMessage
 		req.Params = data
 	}
 
-	// Register pending response channel
+	// 注册响应等待通道
 	ch := make(chan *Message, 1)
 	c.pendingMu.Lock()
 	c.pending[id] = ch
@@ -228,13 +286,18 @@ func (c *Client) sendRequest(method string, params interface{}) (json.RawMessage
 		return nil, err
 	}
 
-	// Wait for response
+	// 等待响应，带超时保护
+	timer := time.NewTimer(sendRequestTimeout)
+	defer timer.Stop()
+
 	select {
 	case msg := <-ch:
 		if msg.Error != nil {
 			return nil, fmt.Errorf("RPC error %d: %s", msg.Error.Code, msg.Error.Message)
 		}
 		return msg.Result, nil
+	case <-timer.C:
+		return nil, fmt.Errorf("request timeout after %v for method %s", sendRequestTimeout, method)
 	case <-c.done:
 		return nil, fmt.Errorf("client stopped")
 	}
@@ -328,6 +391,16 @@ func (c *Client) handleSessionUpdate(params json.RawMessage) {
 			c.OnMessageChunk(&chunk)
 		}
 
+	case "agent_thought_chunk":
+		var chunk AgentThoughtChunk
+		if err := json.Unmarshal(updateEnvelope.Update, &chunk); err != nil {
+			log.Printf("[ACP] Failed to parse thought chunk: %v", err)
+			return
+		}
+		if c.OnThoughtChunk != nil {
+			c.OnThoughtChunk(&chunk)
+		}
+
 	case "tool_call":
 		var tc ToolCall
 		if err := json.Unmarshal(updateEnvelope.Update, &tc); err != nil {
@@ -375,9 +448,15 @@ func (c *Client) handleAgentRequest(msg *Message) {
 			c.OnPermissionReq(msg.ID, &params)
 		}
 
+	case "fs/read_text_file":
+		c.handleFSReadTextFile(msg)
+
+	case "fs/write_text_file":
+		c.handleFSWriteTextFile(msg)
+
 	default:
 		log.Printf("[ACP] Unhandled agent request: %s", msg.Method)
-		// Send error response for unknown methods
+		// 对未知方法返回错误响应
 		resp := Response{
 			JSONRPC: "2.0",
 			ID:      msg.ID,
@@ -388,4 +467,107 @@ func (c *Client) handleAgentRequest(msg *Message) {
 		}
 		c.transport.WriteMessage(resp)
 	}
+}
+
+// handleFSReadTextFile 处理 Agent 发起的文件读取请求
+func (c *Client) handleFSReadTextFile(msg *Message) {
+	var params struct {
+		Path      string `json:"path"`
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		log.Printf("[ACP] Failed to parse fs/read_text_file params: %v", err)
+		c.sendRPCError(msg.ID, -32602, "Invalid params")
+		return
+	}
+
+	// 安全校验：解析路径，防止路径遍历
+	absPath, err := filepath.Abs(params.Path)
+	if err != nil {
+		c.sendRPCError(msg.ID, -32602, fmt.Sprintf("Invalid path: %v", err))
+		return
+	}
+
+	log.Printf("[ACP] fs/read_text_file: %s", absPath)
+
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		log.Printf("[ACP] fs/read_text_file error: %v", err)
+		c.sendRPCError(msg.ID, -32000, fmt.Sprintf("Failed to read file: %v", err))
+		return
+	}
+
+	result := map[string]interface{}{
+		"content": string(content),
+	}
+	resultData, _ := json.Marshal(result)
+
+	resp := Response{
+		JSONRPC: "2.0",
+		ID:      msg.ID,
+		Result:  resultData,
+	}
+	c.transport.WriteMessage(resp)
+}
+
+// handleFSWriteTextFile 处理 Agent 发起的文件写入请求
+func (c *Client) handleFSWriteTextFile(msg *Message) {
+	var params struct {
+		Path      string `json:"path"`
+		Content   string `json:"content"`
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		log.Printf("[ACP] Failed to parse fs/write_text_file params: %v", err)
+		c.sendRPCError(msg.ID, -32602, "Invalid params")
+		return
+	}
+
+	// 安全校验：解析路径
+	absPath, err := filepath.Abs(params.Path)
+	if err != nil {
+		c.sendRPCError(msg.ID, -32602, fmt.Sprintf("Invalid path: %v", err))
+		return
+	}
+
+	log.Printf("[ACP] fs/write_text_file: %s (%d bytes)", absPath, len(params.Content))
+
+	// 确保目录存在
+	dir := filepath.Dir(absPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		c.sendRPCError(msg.ID, -32000, fmt.Sprintf("Failed to create directory: %v", err))
+		return
+	}
+
+	// 写入文件
+	if err := os.WriteFile(absPath, []byte(params.Content), 0644); err != nil {
+		log.Printf("[ACP] fs/write_text_file error: %v", err)
+		c.sendRPCError(msg.ID, -32000, fmt.Sprintf("Failed to write file: %v", err))
+		return
+	}
+
+	result := map[string]interface{}{
+		"success": true,
+	}
+	resultData, _ := json.Marshal(result)
+
+	resp := Response{
+		JSONRPC: "2.0",
+		ID:      msg.ID,
+		Result:  resultData,
+	}
+	c.transport.WriteMessage(resp)
+}
+
+// sendRPCError 发送 JSON-RPC 错误响应
+func (c *Client) sendRPCError(id interface{}, code int, message string) {
+	resp := Response{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error: &RPCError{
+			Code:    code,
+			Message: message,
+		},
+	}
+	c.transport.WriteMessage(resp)
 }

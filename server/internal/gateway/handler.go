@@ -108,6 +108,8 @@ func (h *Handler) handleMessage(raw []byte) {
 		h.handleCancel()
 	case "list_agents":
 		h.sendAgentList()
+	case "list_gemini_sessions":
+		h.handleListGeminiSessions(msg.Payload)
 	default:
 		h.sendError("Unknown message type: " + msg.Type)
 	}
@@ -122,7 +124,10 @@ func (h *Handler) handleStartAgent(payload json.RawMessage) {
 		return
 	}
 
-	// Notify starting
+	log.Printf("[Handler] handleStartAgent: agentId=%s, workDir=%s, geminiSessionID=%s",
+		p.AgentID, p.WorkDir, p.GeminiSessionID)
+
+	// Notify starting — 这条消息会立即通过 writeLoop 发出
 	h.send(&ServerMessage{
 		Type: MsgTypeAgentStatus,
 		Payload: AgentStatusPayload{
@@ -131,31 +136,47 @@ func (h *Handler) handleStartAgent(payload json.RawMessage) {
 		},
 	})
 
-	proc, err := h.server.mgr.StartAgent(p.AgentID, p.WorkDir)
-	if err != nil {
+	// 异步执行启动逻辑，避免阻塞 readLoop（防止 startInternal 卡住时无法处理其他消息）
+	go func() {
+		var proc *agent.Process
+		var err error
+
+		if p.GeminiSessionID != "" {
+			// 恢复 Gemini CLI 原生会话
+			log.Printf("[Handler] Starting agent with resume: sessionID=%s", p.GeminiSessionID)
+			proc, err = h.server.mgr.StartAgentWithResume(p.AgentID, p.WorkDir, p.GeminiSessionID)
+		} else {
+			log.Printf("[Handler] Starting agent (new session)")
+			proc, err = h.server.mgr.StartAgent(p.AgentID, p.WorkDir)
+		}
+
+		if err != nil {
+			log.Printf("[Handler] Agent start failed: %v", err)
+			h.send(&ServerMessage{
+				Type: MsgTypeAgentStatus,
+				Payload: AgentStatusPayload{
+					AgentID: p.AgentID,
+					Status:  "error",
+					Error:   err.Error(),
+				},
+			})
+			return
+		}
+
+		log.Printf("[Handler] Agent started successfully, wiring callbacks")
+		h.agent = proc
+
+		// Wire up ACP callbacks → WebSocket messages
+		h.wireAgentCallbacks(proc)
+
 		h.send(&ServerMessage{
 			Type: MsgTypeAgentStatus,
 			Payload: AgentStatusPayload{
 				AgentID: p.AgentID,
-				Status:  "error",
-				Error:   err.Error(),
+				Status:  "running",
 			},
 		})
-		return
-	}
-
-	h.agent = proc
-
-	// Wire up ACP callbacks → WebSocket messages
-	h.wireAgentCallbacks(proc)
-
-	h.send(&ServerMessage{
-		Type: MsgTypeAgentStatus,
-		Payload: AgentStatusPayload{
-			AgentID: p.AgentID,
-			Status:  "running",
-		},
-	})
+	}()
 }
 
 func (h *Handler) handleStopAgent(payload json.RawMessage) {
@@ -187,17 +208,25 @@ func (h *Handler) handleSendPrompt(payload json.RawMessage) {
 	}
 
 	if h.agent == nil {
+		log.Printf("[Handler] handleSendPrompt: h.agent is nil, no agent running")
 		h.sendError("No agent running. Start an agent first.")
 		return
 	}
 
+	log.Printf("[Handler] handleSendPrompt: agent state=%s", h.agent.State())
+
 	client := h.agent.Client()
 	if client == nil {
+		log.Printf("[Handler] handleSendPrompt: client is nil")
 		h.sendError("Agent not ready")
 		return
 	}
 
+	log.Printf("[Handler] handleSendPrompt: client sessionID=%s, sending text=%q",
+		client.SessionID(), p.Text[:min(len(p.Text), 50)])
+
 	if err := client.SendPrompt(p.Text); err != nil {
+		log.Printf("[Handler] handleSendPrompt: SendPrompt failed: %v", err)
 		h.sendError("Failed to send prompt: " + err.Error())
 	}
 }
@@ -247,6 +276,14 @@ func (h *Handler) wireAgentCallbacks(proc *agent.Process) {
 	client.OnMessageChunk = func(chunk *acp.AgentMessageChunk) {
 		h.send(&ServerMessage{
 			Type:    MsgTypeMessageChunk,
+			Payload: MessageChunkPayload{Text: chunk.Content.Text},
+		})
+	}
+
+	client.OnThoughtChunk = func(chunk *acp.AgentThoughtChunk) {
+		// agent 的思考/推理过程，使用独立的 thought_chunk 类型
+		h.send(&ServerMessage{
+			Type:    MsgTypeThoughtChunk,
 			Payload: MessageChunkPayload{Text: chunk.Content.Text},
 		})
 	}
@@ -323,6 +360,11 @@ func (h *Handler) wireAgentCallbacks(proc *agent.Process) {
 		if err != nil {
 			errMsg = err.Error()
 		}
+		// 先发送 turn_complete，确保前端退出 thinking 状态
+		h.send(&ServerMessage{
+			Type:    MsgTypeTurnComplete,
+			Payload: TurnCompletePayload{StopReason: "disconnected"},
+		})
 		h.send(&ServerMessage{
 			Type: MsgTypeAgentStatus,
 			Payload: AgentStatusPayload{
@@ -353,6 +395,25 @@ func (h *Handler) sendAgentList() {
 	h.send(&ServerMessage{
 		Type:    MsgTypeAgentList,
 		Payload: AgentListPayload{Agents: list},
+	})
+}
+
+// handleListGeminiSessions 扫描 Gemini CLI 原生会话并返回列表
+func (h *Handler) handleListGeminiSessions(payload json.RawMessage) {
+	var p ListGeminiSessionsPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		h.sendError("Invalid list_gemini_sessions payload")
+		return
+	}
+
+	sessions := h.server.listGeminiNativeSessions(p.WorkDir)
+
+	h.send(&ServerMessage{
+		Type: MsgTypeGeminiSessions,
+		Payload: GeminiSessionsPayload{
+			WorkDir:  p.WorkDir,
+			Sessions: sessions,
+		},
 	})
 }
 

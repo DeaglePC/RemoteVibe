@@ -37,6 +37,16 @@ func (m *Manager) GetAgent(agentID string) *Process {
 
 // StartAgent launches an agent process
 func (m *Manager) StartAgent(agentID string, workDir string) (*Process, error) {
+	return m.startAgentInternal(agentID, workDir, "")
+}
+
+// StartAgentWithResume 启动 Agent 并恢复已有的 Gemini CLI 会话
+func (m *Manager) StartAgentWithResume(agentID string, workDir string, geminiSessionID string) (*Process, error) {
+	return m.startAgentInternal(agentID, workDir, geminiSessionID)
+}
+
+// startAgentInternal 是启动 Agent 的内部方法
+func (m *Manager) startAgentInternal(agentID string, workDir string, geminiSessionID string) (*Process, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -59,7 +69,13 @@ func (m *Manager) StartAgent(agentID string, workDir string) (*Process, error) {
 
 	// Create and start process
 	proc := NewProcess(*agentDef)
-	if err := proc.Start(workDir); err != nil {
+	var err error
+	if geminiSessionID != "" {
+		err = proc.StartWithResume(workDir, geminiSessionID)
+	} else {
+		err = proc.Start(workDir)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("start agent %s: %w", agentID, err)
 	}
 

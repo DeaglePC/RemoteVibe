@@ -12,8 +12,9 @@ type ClientMessage struct {
 
 // StartAgentPayload requests launching an agent
 type StartAgentPayload struct {
-	AgentID string `json:"agentId"`
-	WorkDir string `json:"workDir,omitempty"`
+	AgentID          string `json:"agentId"`
+	WorkDir          string `json:"workDir,omitempty"`
+	GeminiSessionID  string `json:"geminiSessionId,omitempty"` // 非空时恢复 Gemini CLI 原生会话
 }
 
 // SendPromptPayload sends a user message to the agent
@@ -40,12 +41,14 @@ const (
 	MsgTypeAgentStatus      = "agent_status"
 	MsgTypeAgentList        = "agent_list"
 	MsgTypeMessageChunk     = "message_chunk"
+	MsgTypeThoughtChunk     = "thought_chunk"    // Agent 的思考/推理过程
 	MsgTypeToolCall         = "tool_call"
 	MsgTypeToolCallUpdate   = "tool_call_update"
 	MsgTypePermissionReq    = "permission_request"
 	MsgTypeTurnComplete     = "turn_complete"
 	MsgTypePlanUpdate       = "plan_update"
 	MsgTypeError            = "error"
+	MsgTypeGeminiSessions   = "gemini_sessions" // Gemini CLI 原生会话列表
 )
 
 // AgentStatusPayload reports agent connection state
@@ -128,4 +131,26 @@ type PlanEntryWS struct {
 // ErrorPayload reports an error to the frontend
 type ErrorPayload struct {
 	Message string `json:"message"`
+}
+
+// ==================== Gemini CLI Native Session Types ====================
+
+// GeminiSessionInfo 表示一个 Gemini CLI 原生会话
+type GeminiSessionInfo struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	CreatedAt   int64  `json:"createdAt"`   // Unix 毫秒时间戳
+	UpdatedAt   int64  `json:"updatedAt"`   // Unix 毫秒时间戳
+	MessageCount int   `json:"messageCount"`
+}
+
+// GeminiSessionsPayload 是 Gemini CLI 原生会话列表的响应
+type GeminiSessionsPayload struct {
+	WorkDir  string              `json:"workDir"`
+	Sessions []GeminiSessionInfo `json:"sessions"`
+}
+
+// ListGeminiSessionsPayload 是前端请求列出 Gemini CLI 原生会话的参数
+type ListGeminiSessionsPayload struct {
+	WorkDir string `json:"workDir"`
 }
