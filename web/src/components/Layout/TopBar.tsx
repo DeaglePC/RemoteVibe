@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { useBackendStore, getApiBaseUrl, getAuthHeaders } from '../../stores/backendStore';
 import FolderPickerModal from '../FolderPickerModal';
@@ -10,9 +10,13 @@ interface Props {
   onStartAgent: (agentId: string, workDir: string) => void;
   onStartAgentWithResume: (agentId: string, workDir: string, geminiSessionId: string) => void;
   onStopAgent: (agentId: string) => void;
+  /** 当此值变化时，自动触发 Launch 流程 */
+  launchTrigger?: number;
+  /** 为 true 时隐藏 header 栏（桌面端用 ActivityBar 替代），但弹窗仍可用 */
+  hideHeader?: boolean;
 }
 
-export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAgent }: Props) {
+export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAgent, launchTrigger, hideHeader }: Props) {
   const agents = useChatStore((s) => s.agents);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
   const agentStatus = useChatStore((s) => s.agentStatus);
@@ -44,6 +48,13 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
     setShowWorkspacePicker(true);
     setShowMobileMenu(false);
   };
+
+  // 当 launchTrigger 变化时（从 ActivityBar 触发），自动打开 workspace picker
+  useEffect(() => {
+    if (launchTrigger && launchTrigger > 0) {
+      handleLaunchClick();
+    }
+  }, [launchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFolderSelect = (path: string) => {
     setShowFolderPicker(false);
@@ -291,6 +302,7 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
   return (
     <>
     {/* ==================== Desktop Header ==================== */}
+    {!hideHeader && (
     <header className="hidden sm:flex glass-strong items-center justify-between px-4 py-3 z-10"
       style={{ borderBottom: '1px solid var(--color-border)' }}>
       {/* Left: Logo & Title */}
@@ -555,8 +567,10 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
         />
       </div>
     </header>
+    )}
 
     {/* ==================== Mobile Header ==================== */}
+    {!hideHeader && (
     <header className="sm:hidden glass-strong z-10 safe-top"
       style={{ borderBottom: '1px solid var(--color-border)' }}>
       <div className="flex items-center justify-between px-3 py-2">
@@ -795,6 +809,7 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
         </>
       )}
     </header>
+    )}
 
       <FolderPickerModal
         open={showFolderPicker}

@@ -136,8 +136,10 @@ type SessionPromptParams struct {
 	Prompt    []ContentBlock `json:"prompt"`
 }
 
+// SessionPromptResult 表示一轮对话的结果
 type SessionPromptResult struct {
-	StopReason string `json:"stopReason"` // "end_turn", "max_tokens", "cancelled", etc.
+	StopReason   string `json:"stopReason"`             // "end_turn", "max_tokens", "cancelled", "error" 等
+	ErrorMessage string `json:"errorMessage,omitempty"` // 当 StopReason == "error" 时，携带错误详情
 }
 
 // ==================== ACP Session Updates (Notifications) ====================

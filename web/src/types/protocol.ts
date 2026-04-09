@@ -41,6 +41,7 @@ export const MSG = {
   TURN_COMPLETE: 'turn_complete',
   PLAN_UPDATE: 'plan_update',
   ERROR: 'error',
+  FILE_CHANGE: 'file_change',
   GEMINI_SESSIONS: 'gemini_sessions',
 } as const;
 
@@ -70,6 +71,7 @@ export interface ToolCallPayload {
   kind: string;
   status: string;
   content?: ToolCallContent[];
+  locations?: ToolCallLocation[];
 }
 
 export interface ToolCallUpdatePayload {
@@ -82,6 +84,19 @@ export interface ToolCallContent {
   type: 'text' | 'diff' | 'terminal';
   text?: string;
   path?: string;
+  oldText?: string;
+  newText?: string;
+}
+
+export interface ToolCallLocation {
+  path: string;
+  line?: number;
+}
+
+export interface FileChangePayload {
+  path: string;
+  action: 'write' | 'create';
+  size: number;
   oldText?: string;
   newText?: string;
 }
@@ -100,6 +115,7 @@ export interface PermissionOption {
 
 export interface TurnCompletePayload {
   stopReason: string;
+  errorMessage?: string;
 }
 
 export interface PlanUpdatePayload {
@@ -114,6 +130,12 @@ export interface PlanEntry {
 
 export interface ErrorPayload {
   message: string;
+}
+
+export interface ACPLogPayload {
+  direction: 'tx' | 'rx';
+  message: string;
+  timestamp: number;
 }
 
 // ==================== Gemini CLI Native Session Types ====================
@@ -178,6 +200,7 @@ const LOCAL_COMMANDS: SlashCommand[] = [
   { id: 'status', name: '/status', description: 'Show agent connection status', icon: '📊', scope: 'local', group: 'App' },
   { id: 'stop', name: '/stop', description: 'Stop current agent process', icon: '⏹️', scope: 'local', group: 'App' },
   { id: 'restart', name: '/restart', description: 'Restart current agent process', icon: '🔄', scope: 'local', group: 'App' },
+  { id: 'log', name: '/log', description: 'Toggle ACP protocol log panel', icon: '📡', scope: 'local', group: 'App' },
 ];
 
 /**

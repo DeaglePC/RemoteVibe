@@ -91,6 +91,7 @@ func NewServer(cfg *config.Config, mgr *agent.Manager) *Server {
 	mux.HandleFunc("/api/browse", s.handleBrowse)
 	mux.HandleFunc("/api/mkdir", s.handleMkdir)
 	mux.HandleFunc("/api/files", s.handleFiles)
+	mux.HandleFunc("/api/file-content", s.handleFileContent)
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/workspaces", s.handleWorkspaces)
 	mux.HandleFunc("/api/auth-status", s.handleAuthStatus)
@@ -365,6 +366,63 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		"path":    dirPath,
 		"isDir":   true,
 		"entries": items,
+	})
+	w.Write(data)
+}
+
+// handleFileContent 读取文件内容并返回给客户端
+// GET: ?path=/path/to/file
+// 仅支持读取文本类文件，限制文件大小为 2MB
+func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		errMsg, _ := json.Marshal(map[string]string{"error": "path is required"})
+		w.Write(errMsg)
+		return
+	}
+
+	filePath = filepath.Clean(filePath)
+
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		errMsg, _ := json.Marshal(map[string]string{"error": err.Error()})
+		w.Write(errMsg)
+		return
+	}
+
+	if stat.IsDir() {
+		w.WriteHeader(http.StatusBadRequest)
+		errMsg, _ := json.Marshal(map[string]string{"error": "path is a directory, not a file"})
+		w.Write(errMsg)
+		return
+	}
+
+	// 限制文件大小为 2MB
+	const maxFileSize = 2 * 1024 * 1024
+	if stat.Size() > maxFileSize {
+		w.WriteHeader(http.StatusBadRequest)
+		errMsg, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("file too large: %d bytes (max %d)", stat.Size(), maxFileSize)})
+		w.Write(errMsg)
+		return
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		errMsg, _ := json.Marshal(map[string]string{"error": err.Error()})
+		w.Write(errMsg)
+		return
+	}
+
+	data, _ := json.Marshal(map[string]interface{}{
+		"path":    filePath,
+		"name":    stat.Name(),
+		"size":    stat.Size(),
+		"content": string(content),
 	})
 	w.Write(data)
 }

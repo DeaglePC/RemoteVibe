@@ -290,6 +290,7 @@ func (h *Handler) wireAgentCallbacks(proc *agent.Process) {
 
 	client.OnToolCall = func(tc *acp.ToolCall) {
 		content := convertToolCallContent(tc.Content)
+		locations := convertToolCallLocations(tc.Locations)
 		h.send(&ServerMessage{
 			Type: MsgTypeToolCall,
 			Payload: ToolCallPayload{
@@ -298,6 +299,7 @@ func (h *Handler) wireAgentCallbacks(proc *agent.Process) {
 				Kind:       tc.Kind,
 				Status:     tc.Status,
 				Content:    content,
+				Locations:  locations,
 			},
 		})
 	}
@@ -348,10 +350,58 @@ func (h *Handler) wireAgentCallbacks(proc *agent.Process) {
 		})
 	}
 
+	client.OnACPLog = func(direction string, message string) {
+		h.send(&ServerMessage{
+			Type: MsgTypeACPLog,
+			Payload: ACPLogPayload{
+				Direction: direction,
+				Message:   message,
+				Timestamp: time.Now().UnixMilli(),
+			},
+		})
+	}
+
+	client.OnUnknownEvent = func(eventType string, rawJSON string) {
+		// 未知事件作为 acp_log 的 rx 日志推送前端，让用户能看到所有协议交互
+		h.send(&ServerMessage{
+			Type: MsgTypeACPLog,
+			Payload: ACPLogPayload{
+				Direction: "rx",
+				Message:   rawJSON,
+				Timestamp: time.Now().UnixMilli(),
+			},
+		})
+	}
+
+	client.OnFileChange = func(path string, oldContent string, newContent string, isCreate bool) {
+		action := "write"
+		if isCreate {
+			action = "create"
+		}
+		// 对大文件不传完整内容，只发路径和 action
+		const maxDiffSize = 512 * 1024 // 512KB
+		payload := FileChangePayload{
+			Path:   path,
+			Action: action,
+			Size:   len(newContent),
+		}
+		if len(oldContent)+len(newContent) <= maxDiffSize {
+			payload.OldText = oldContent
+			payload.NewText = newContent
+		}
+		h.send(&ServerMessage{
+			Type:    MsgTypeFileChange,
+			Payload: payload,
+		})
+	}
+
 	client.OnTurnComplete = func(result *acp.SessionPromptResult) {
 		h.send(&ServerMessage{
-			Type:    MsgTypeTurnComplete,
-			Payload: TurnCompletePayload{StopReason: result.StopReason},
+			Type: MsgTypeTurnComplete,
+			Payload: TurnCompletePayload{
+				StopReason:   result.StopReason,
+				ErrorMessage: result.ErrorMessage,
+			},
 		})
 	}
 
@@ -463,6 +513,21 @@ func convertToolCallContent(items []acp.ToolCallContent) []ToolCallContentWS {
 			ws.Text = item.TerminalID
 		}
 		result[i] = ws
+	}
+	return result
+}
+
+// convertToolCallLocations 将 ACP ToolCallLocation 转为前端格式
+func convertToolCallLocations(items []acp.ToolCallLocation) []ToolCallLocationWS {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]ToolCallLocationWS, len(items))
+	for i, item := range items {
+		result[i] = ToolCallLocationWS{
+			Path: item.Path,
+			Line: item.Line,
+		}
 	}
 	return result
 }

@@ -12,6 +12,9 @@ import type {
   PlanUpdatePayload,
   ErrorPayload,
   ClientMessage,
+  FileChangePayload,
+  TurnCompletePayload,
+  ACPLogPayload,
   GeminiSessionsPayload,
 } from '../types/protocol';
 import { MSG } from '../types/protocol';
@@ -174,8 +177,19 @@ export function useWebSocket() {
       }
 
       case MSG.TURN_COMPLETE: {
+        const p = msg.payload as TurnCompletePayload;
         s.setIsAgentThinking(false);
         s.clearThinkingContent();
+        // 当 stopReason 为 error 时，显示详细错误信息
+        if (p.stopReason === 'error' && p.errorMessage) {
+          s.setLastError(p.errorMessage);
+          s.addMessage({
+            id: genMessageId(),
+            role: 'system',
+            content: `❌ ${p.errorMessage}`,
+            timestamp: Date.now(),
+          });
+        }
         break;
       }
 
@@ -200,6 +214,18 @@ export function useWebSocket() {
       case MSG.GEMINI_SESSIONS: {
         const p = msg.payload as GeminiSessionsPayload;
         s.setGeminiSessions(p.sessions || []);
+        break;
+      }
+
+      case MSG.FILE_CHANGE: {
+        const p = msg.payload as FileChangePayload;
+        s.addFileChange(p);
+        break;
+      }
+
+      case MSG.ACP_LOG: {
+        const p = msg.payload as ACPLogPayload;
+        s.addACPLog(p);
         break;
       }
     }

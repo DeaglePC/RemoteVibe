@@ -6,6 +6,8 @@ import type {
   PermissionRequestPayload,
   PlanEntry,
   GeminiSessionInfo,
+  FileChangePayload,
+  ACPLogPayload,
 } from '../types/protocol';
 
 // ==================== Message Types ====================
@@ -188,6 +190,10 @@ interface ChatState {
   showFileBrowser: boolean;
   setShowFileBrowser: (show: boolean) => void;
 
+  // File viewer state
+  viewingFile: { path: string; name: string } | null;
+  setViewingFile: (file: { path: string; name: string } | null) => void;
+
   // Gemini CLI native sessions
   geminiSessions: GeminiSessionInfo[];
   geminiSessionsLoading: boolean;
@@ -225,6 +231,18 @@ interface ChatState {
   // Error
   lastError: string | null;
   setLastError: (err: string | null) => void;
+
+  // File changes — 追踪 Agent 修改过的文件
+  changedFiles: Map<string, FileChangePayload>;
+  addFileChange: (change: FileChangePayload) => void;
+  clearChangedFiles: () => void;
+
+  // ACP 协议日志 — 用于显示 Gemini CLI 的所有 ACP 通信
+  acpLogs: ACPLogPayload[];
+  addACPLog: (log: ACPLogPayload) => void;
+  clearACPLogs: () => void;
+  showACPLogs: boolean;
+  setShowACPLogs: (show: boolean) => void;
 }
 
 let messageIdCounter = 0;
@@ -440,6 +458,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showFileBrowser: false,
   setShowFileBrowser: (show) => set({ showFileBrowser: show }),
 
+  // File viewer
+  viewingFile: null,
+  setViewingFile: (file) => set({ viewingFile: file }),
+
   // Gemini CLI native sessions
   geminiSessions: [],
   geminiSessionsLoading: false,
@@ -542,4 +564,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Error
   lastError: null,
   setLastError: (err) => set({ lastError: err }),
+
+  // File changes
+  changedFiles: new Map(),
+  addFileChange: (change) =>
+    set((s) => {
+      const m = new Map(s.changedFiles);
+      m.set(change.path, change);
+      return { changedFiles: m };
+    }),
+  clearChangedFiles: () => set({ changedFiles: new Map() }),
+
+  // ACP 协议日志
+  acpLogs: [],
+  addACPLog: (log) =>
+    set((s) => {
+      // 限制最多保留 500 条日志，超出后丢弃最早的
+      const logs = [...s.acpLogs, log];
+      if (logs.length > 500) {
+        return { acpLogs: logs.slice(-500) };
+      }
+      return { acpLogs: logs };
+    }),
+  clearACPLogs: () => set({ acpLogs: [] }),
+  showACPLogs: false,
+  setShowACPLogs: (show) => set({ showACPLogs: show }),
 }));

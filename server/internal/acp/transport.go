@@ -20,6 +20,9 @@ type Transport struct {
 	onNotification chan *Message
 	onRequest      chan *Message
 	onError        chan error
+
+	// OnLog 可选回调，当 TX/RX 消息时触发（direction: "tx" 或 "rx"）
+	OnLog func(direction string, message string)
 }
 
 // NewTransport creates a transport over the given reader/writer (typically process stdin/stdout)
@@ -52,6 +55,9 @@ func (t *Transport) WriteMessage(msg interface{}) error {
 	}
 
 	log.Printf("[ACP TX] %s", string(data[:len(data)-1]))
+	if t.OnLog != nil {
+		t.OnLog("tx", string(data[:len(data)-1]))
+	}
 	return nil
 }
 
@@ -75,6 +81,9 @@ func (t *Transport) ReadLoop() {
 		}
 
 		log.Printf("[ACP RX] %s", string(line[:len(line)-1]))
+		if t.OnLog != nil {
+			t.OnLog("rx", string(line[:len(line)-1]))
+		}
 
 		var msg Message
 		if err := json.Unmarshal(line, &msg); err != nil {

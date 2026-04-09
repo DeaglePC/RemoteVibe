@@ -7,15 +7,19 @@ import {
   X, Home, ArrowUp, ArrowDown, Eye, EyeOff as EyeOffToggle
 } from 'lucide-react';
 
+import { isTextFile } from './FileViewer';
+
 type SortKey = 'name' | 'size' | 'modTime';
 type SortDir = 'asc' | 'desc';
 
 interface Props {
   rootPath: string;
   onClose: () => void;
+  /** 点击可预览的文件时触发 */
+  onFileOpen?: (filePath: string, fileName: string) => void;
 }
 
-export default function FileBrowser({ rootPath, onClose }: Props) {
+export default function FileBrowser({ rootPath, onClose, onFileOpen }: Props) {
   const [currentPath, setCurrentPath] = useState(rootPath);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -77,11 +81,20 @@ export default function FileBrowser({ rootPath, onClose }: Props) {
   });
 
   const handleNavigate = (entry: FileEntry) => {
-    if (!entry.isDir) return;
-    const newPath = currentPath.endsWith('/')
-      ? `${currentPath}${entry.name}`
-      : `${currentPath}/${entry.name}`;
-    fetchFiles(newPath);
+    if (entry.isDir) {
+      const newPath = currentPath.endsWith('/')
+        ? `${currentPath}${entry.name}`
+        : `${currentPath}/${entry.name}`;
+      fetchFiles(newPath);
+      return;
+    }
+    // 文本文件支持点击打开预览
+    if (onFileOpen && isTextFile(entry.name)) {
+      const filePath = currentPath.endsWith('/')
+        ? `${currentPath}${entry.name}`
+        : `${currentPath}/${entry.name}`;
+      onFileOpen(filePath, entry.name);
+    }
   };
 
   const handleGoUp = () => {
@@ -203,7 +216,7 @@ export default function FileBrowser({ rootPath, onClose }: Props) {
   const pathParts = relativePath.split('/').filter(Boolean);
 
   return (
-    <div className="flex flex-col h-full bg-[var(--color-surface-0)] border-l border-[var(--color-border)] select-none">
+    <div className="flex flex-col h-full bg-[var(--color-surface-0)] select-none">
       {/* Header Area */}
       <div className="flex flex-col flex-shrink-0 pt-safe bg-[var(--color-surface-1)] border-b border-[var(--color-border)]">
         
@@ -305,49 +318,56 @@ export default function FileBrowser({ rootPath, onClose }: Props) {
 
         {!loading && !error && (
           <div className="flex flex-col gap-0.5">
-            {sortedEntries.map((entry) => (
-              <button
-                key={entry.name}
-                onClick={() => handleNavigate(entry)}
-                className="group w-full flex items-center gap-3 px-3 py-3 sm:py-2 rounded-lg text-left transition-all duration-150 border border-transparent hover:bg-[var(--color-surface-2)] hover:border-[var(--color-border)] cursor-pointer"
-              >
-                {/* Icon Area */}
-                <div className="flex-shrink-0 flex items-center justify-center">
-                  {getFileIcon(entry.name, entry.isDir)}
-                </div>
-
-                {/* Filename */}
-                <span 
-                  className="text-sm truncate flex-1 font-mono tracking-tight" 
-                  style={{ 
-                    color: entry.isDir ? 'var(--color-text-primary)' : 'var(--color-text-secondary)'
-                  }}
+            {sortedEntries.map((entry) => {
+              const canOpen = !entry.isDir && isTextFile(entry.name);
+              return (
+                <button
+                  key={entry.name}
+                  onClick={() => handleNavigate(entry)}
+                  className={`group w-full flex items-center gap-3 px-3 py-3 sm:py-2 rounded-lg text-left transition-all duration-150 border border-transparent cursor-pointer ${
+                    entry.isDir || canOpen
+                      ? 'hover:bg-[var(--color-surface-2)] hover:border-[var(--color-border)]'
+                      : 'opacity-60 cursor-default'
+                  }`}
                 >
-                  {entry.name}
-                </span>
-
-                {/* Metadata Area (hidden on very small screens) */}
-                <div className="hidden sm:flex items-center gap-4 flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
-                  {!entry.isDir && (
-                    <span className="text-xs text-[var(--color-text-muted)] font-mono w-16 text-right">
-                      {formatSize(entry.size)}
-                    </span>
-                  )}
-                  {entry.isDir && <span className="w-16" />} {/* Placeholder to align dates */}
-                  
-                  <span className="text-xs text-[var(--color-text-muted)] w-24 text-right">
-                    {formatDate(entry.modTime)}
-                  </span>
-                </div>
-                
-                {/* Chevron indicator for mobile instead of details */}
-                {entry.isDir && (
-                  <div className="sm:hidden text-[var(--color-text-muted)] opacity-50">
-                    <ArrowDown size={14} className="-rotate-90" />
+                  {/* Icon Area */}
+                  <div className="flex-shrink-0 flex items-center justify-center">
+                    {getFileIcon(entry.name, entry.isDir)}
                   </div>
-                )}
-              </button>
-            ))}
+
+                  {/* Filename */}
+                  <span 
+                    className="text-sm truncate flex-1 font-mono tracking-tight" 
+                    style={{ 
+                      color: entry.isDir ? 'var(--color-text-primary)' : canOpen ? 'var(--color-text-secondary)' : 'var(--color-text-muted)'
+                    }}
+                  >
+                    {entry.name}
+                  </span>
+
+                  {/* Metadata Area (hidden on very small screens) */}
+                  <div className="hidden sm:flex items-center gap-4 flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
+                    {!entry.isDir && (
+                      <span className="text-xs text-[var(--color-text-muted)] font-mono w-16 text-right">
+                        {formatSize(entry.size)}
+                      </span>
+                    )}
+                    {entry.isDir && <span className="w-16" />} {/* Placeholder to align dates */}
+                    
+                    <span className="text-xs text-[var(--color-text-muted)] w-24 text-right">
+                      {formatDate(entry.modTime)}
+                    </span>
+                  </div>
+                  
+                  {/* Chevron indicator for mobile: folders & text files */}
+                  {(entry.isDir || canOpen) && (
+                    <div className="sm:hidden text-[var(--color-text-muted)] opacity-50">
+                      <ArrowDown size={14} className="-rotate-90" />
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

@@ -134,6 +134,17 @@ body {
   }
 }
 
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @keyframes pulse-glow {
   0%, 100% {
     box-shadow: 0 0 4px oklch(0.72 0.18 195 / 0.4);
@@ -158,6 +169,10 @@ body {
 
 .animate-slide-in-right {
   animation: slideInRight 0.3s ease-out both;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.3s ease-out both;
 }
 
 .animate-pulse-glow {
@@ -277,13 +292,46 @@ body {
   animation: slideUp 0.3s ease-out both;
 }
 
-/* Mobile full-screen overlay */
-.mobile-panel {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
+/* Mobile full-screen overlay — only below sm (640px) */
+@media (max-width: 639px) {
+  .mobile-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+/* ==================== Allotment Split Pane Overrides ==================== */
+
+/* 分割线样式 - 与 VSCode 风格一致 */
+.split-view-view > .sash-container > .sash {
+  transition: background-color 0.15s ease;
+}
+
+/* 分割线 hover 高亮 */
+.split-view-view > .sash-container > .sash::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.split-view-view > .sash-container > .sash:hover::before,
+.split-view-view > .sash-container > .sash.active::before {
+  background: var(--color-accent-500);
+}
+
+/* Allotment 默认 sash 宽度微调 */
+:root {
+  --sash-size: 4px;
+  --focus-border: var(--color-accent-500);
 }
 
 /* Mobile-friendly scrollbar — hide on touch devices */
