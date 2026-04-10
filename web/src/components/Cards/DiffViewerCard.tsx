@@ -1,6 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { diffLines, type Change } from 'diff';
 import type { ToolCallContent } from '../../types/protocol';
+
+/** 超过此行数的 diff 默认折叠 */
+const COLLAPSE_THRESHOLD = 8;
 
 interface Props {
   content: ToolCallContent;
@@ -13,14 +16,18 @@ export default function DiffViewerCard({ content }: Props) {
   }, [content.oldText, content.newText]);
 
   const stats = useMemo(() => {
-    let added = 0, removed = 0;
+    let added = 0;
+    let removed = 0;
     changes.forEach((c) => {
       const lines = c.value.split('\n').filter(Boolean).length;
       if (c.added) added += lines;
       if (c.removed) removed += lines;
     });
-    return { added, removed };
+    return { added, removed, total: added + removed };
   }, [changes]);
+
+  // 大 diff 默认折叠，小 diff 默认展开
+  const [isExpanded, setIsExpanded] = useState(stats.total <= COLLAPSE_THRESHOLD);
 
   return (
     <div
@@ -30,38 +37,62 @@ export default function DiffViewerCard({ content }: Props) {
         border: '1px solid var(--color-border)',
       }}
     >
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-4 py-2"
+      {/* Header — 可点击折叠/展开 */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between px-4 py-2 cursor-pointer transition-colors duration-150"
         style={{
           background: 'var(--color-surface-2)',
-          borderBottom: '1px solid var(--color-border)',
+          borderBottom: isExpanded ? '1px solid var(--color-border)' : 'none',
+          border: 'none',
+          outline: 'none',
         }}
       >
-        <div className="flex items-center gap-2">
-          <span className="text-base">📝</span>
-          <span className="text-xs font-medium" style={{ color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-base flex-shrink-0">📝</span>
+          <span
+            className="text-xs font-medium truncate"
+            style={{ color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}
+          >
             {content.path || 'unknown file'}
           </span>
         </div>
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-2 text-xs flex-shrink-0">
           {stats.added > 0 && (
             <span style={{ color: 'var(--color-success)' }}>+{stats.added}</span>
           )}
           {stats.removed > 0 && (
             <span style={{ color: 'var(--color-danger)' }}>-{stats.removed}</span>
           )}
+          {/* 展开/折叠箭头 */}
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="transition-transform duration-200 ml-1"
+            style={{
+              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
         </div>
-      </div>
+      </button>
 
-      {/* Diff content */}
-      <div className="overflow-x-auto">
-        <pre className="text-xs leading-relaxed m-0 p-0" style={{ fontFamily: 'var(--font-mono)' }}>
-          {changes.map((change, i) => (
-            <DiffBlock key={i} change={change} />
-          ))}
-        </pre>
-      </div>
+      {/* Diff content — 折叠时隐藏 */}
+      {isExpanded && (
+        <div className="overflow-x-auto" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+          <pre className="text-xs leading-relaxed m-0 p-0" style={{ fontFamily: 'var(--font-mono)' }}>
+            {changes.map((change, i) => (
+              <DiffBlock key={i} change={change} />
+            ))}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { FileEntry, FilesResult } from '../../types/protocol';
 import { getApiBaseUrl, getAuthHeaders } from '../../stores/backendStore';
+import { useChatStore } from '../../stores/chatStore';
 import {
   Folder, File as FileIcon, FileCode, FileImage, FileText, Database,
   Terminal, Lock, EyeOff, LayoutTemplate,
@@ -12,6 +13,8 @@ interface Props {
   rootPath: string;
   onClose: () => void;
   onFileOpen?: (filePath: string, fileName: string) => void;
+  /** 发送 WebSocket 消息（用于 watch_dir） */
+  onSendWS?: (msg: { type: string; payload: unknown }) => void;
 }
 
 /** 树节点数据 */
@@ -64,11 +67,18 @@ function getFileIcon(name: string, isDir: boolean, expanded?: boolean) {
   }
 }
 
-export default function FileTreeBrowser({ rootPath, onClose, onFileOpen }: Props) {
+export default function FileTreeBrowser({ rootPath, onClose, onFileOpen, onSendWS }: Props) {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+
+  // 订阅文件系统事件
+  const fsEventVersion = useChatStore((s) => s.fsEventVersion);
+  const lastFSEvent = useChatStore((s) => s.lastFSEvent);
+
+  // 记录已监听的目录（避免重复发送 watch_dir）
+  const watchedDirs = useRef(new Set<string>());
 
   /** 获取目录内容 */
   const fetchDir = useCallback(async (path: string): Promise<FileEntry[]> => {
@@ -117,6 +127,50 @@ export default function FileTreeBrowser({ rootPath, onClose, onFileOpen }: Props
   useEffect(() => {
     loadRoot();
   }, [loadRoot]);
+
+  // 监听文件系统事件，自动刷新受影响的目录
+  const treeRef = useRef(tree);
+  treeRef.current = tree;
+  const fetchDirRef = useRef(fetchDir);
+  fetchDirRef.current = fetchDir;
+  const entriesToNodesRef = useRef(entriesToNodes);
+  entriesToNodesRef.current = entriesToNodes;
+
+  useEffect(() => {
+    if (!lastFSEvent || fsEventVersion === 0) return;
+
+    const { dir } = lastFSEvent;
+
+    // 检查受影响的目录是否在当前树中展开
+    const refreshDir = async (dirPath: string) => {
+      // 如果是根目录本身
+      if (dirPath === rootPath) {
+        try {
+          const entries = await fetchDirRef.current(rootPath);
+          setTree(entriesToNodesRef.current(entries, rootPath, 0));
+        } catch {
+          // 刷新失败时静默忽略
+        }
+        return;
+      }
+
+      // 查找树中对应的展开目录节点并刷新其子节点
+      const node = findNode(treeRef.current, dirPath);
+      if (node && node.expanded) {
+        try {
+          const entries = await fetchDirRef.current(dirPath);
+          const children = entriesToNodesRef.current(entries, dirPath, node.depth + 1);
+          // 保留子节点中已展开的状态
+          const mergedChildren = mergeChildrenState(node.children || [], children);
+          setTree((prev) => updateNodeInTree(prev, dirPath, { children: mergedChildren }));
+        } catch {
+          // 刷新失败时静默忽略
+        }
+      }
+    };
+
+    refreshDir(dir);
+  }, [fsEventVersion, lastFSEvent, rootPath]);
 
   /** 切换目录展开/折叠 */
   const toggleExpand = useCallback(async (targetPath: string) => {
@@ -167,11 +221,18 @@ export default function FileTreeBrowser({ rootPath, onClose, onFileOpen }: Props
         const entries = await fetchDir(node.fullPath);
         const children = entriesToNodes(entries, node.fullPath, node.depth + 1);
         setTree((prev) => updateNodeInTree(prev, targetPath, { children, loading: false, expanded: true }));
+        // 告诉服务端监听这个子目录
+        if (onSendWS && !watchedDirs.current.has(node.fullPath)) {
+          watchedDirs.current.add(node.fullPath);
+          onSendWS({ type: 'watch_dir', payload: { path: node.fullPath, action: 'watch' } });
+        }
       } catch {
         setTree((prev) => updateNodeInTree(prev, targetPath, { children: [], loading: false, expanded: true }));
       }
+    } else if (node && node.expanded) {
+      // 折叠时不需要取消监听（保持监听以便再次展开时能感知变化）
     }
-  }, [tree, fetchDir, entriesToNodes]);
+  }, [tree, fetchDir, entriesToNodes, onSendWS]);
 
   /** 处理节点点击 */
   const handleNodeClick = useCallback((node: TreeNode) => {
@@ -440,5 +501,21 @@ function updateNodeInTree(
       return { ...node, children: updateNodeInTree(node.children, path, updates) };
     }
     return node;
+  });
+}
+
+/** 合并新旧子节点列表，保留已展开节点的 expanded/children 状态 */
+function mergeChildrenState(oldChildren: TreeNode[], newChildren: TreeNode[]): TreeNode[] {
+  const oldMap = new Map<string, TreeNode>();
+  for (const child of oldChildren) {
+    oldMap.set(child.fullPath, child);
+  }
+  return newChildren.map((newChild) => {
+    const oldChild = oldMap.get(newChild.fullPath);
+    if (oldChild && oldChild.isDir && oldChild.expanded && oldChild.children) {
+      // 保留旧的展开状态和子节点
+      return { ...newChild, expanded: true, children: oldChild.children };
+    }
+    return newChild;
   });
 }

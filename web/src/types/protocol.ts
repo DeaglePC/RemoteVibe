@@ -101,6 +101,13 @@ export interface FileChangePayload {
   newText?: string;
 }
 
+export interface FSEventPayload {
+  path: string;   // 变化的文件/目录完整路径
+  dir: string;    // 变化所在的父目录路径
+  name: string;   // 文件/目录名
+  action: 'create' | 'remove' | 'modify';
+}
+
 export interface PermissionRequestPayload {
   requestId: unknown;
   toolCallId: string;

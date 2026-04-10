@@ -13,9 +13,10 @@ import (
 
 // Handler manages the WebSocket message flow for a single client connection
 type Handler struct {
-	server *Server
-	client *ClientConn
-	agent  *agent.Process // currently active agent for this client
+	server     *Server
+	client     *ClientConn
+	agent      *agent.Process // currently active agent for this client
+	dirWatcher *DirWatcher    // 文件系统监听器（agent 运行时启动）
 }
 
 // NewHandler creates a handler for a WebSocket client
@@ -29,6 +30,11 @@ func NewHandler(s *Server, c *ClientConn) *Handler {
 // readLoop reads messages from the WebSocket client
 func (h *Handler) readLoop() {
 	defer func() {
+		// 关闭文件监听器
+		if h.dirWatcher != nil {
+			h.dirWatcher.Close()
+			h.dirWatcher = nil
+		}
 		h.server.removeClient(h.client.conn)
 		h.client.conn.Close()
 		log.Printf("[Handler] Client disconnected: %s", h.client.conn.RemoteAddr())
@@ -110,6 +116,8 @@ func (h *Handler) handleMessage(raw []byte) {
 		h.sendAgentList()
 	case "list_gemini_sessions":
 		h.handleListGeminiSessions(msg.Payload)
+	case "watch_dir":
+		h.handleWatchDir(msg.Payload)
 	default:
 		h.sendError("Unknown message type: " + msg.Type)
 	}
@@ -169,6 +177,9 @@ func (h *Handler) handleStartAgent(payload json.RawMessage) {
 		// Wire up ACP callbacks → WebSocket messages
 		h.wireAgentCallbacks(proc)
 
+		// 启动文件系统监听器
+		h.startDirWatcher(p.WorkDir)
+
 		h.send(&ServerMessage{
 			Type: MsgTypeAgentStatus,
 			Payload: AgentStatusPayload{
@@ -190,6 +201,12 @@ func (h *Handler) handleStopAgent(payload json.RawMessage) {
 
 	h.server.mgr.StopAgent(p.AgentID)
 	h.agent = nil
+
+	// 停止文件系统监听
+	if h.dirWatcher != nil {
+		h.dirWatcher.Close()
+		h.dirWatcher = nil
+	}
 
 	h.send(&ServerMessage{
 		Type: MsgTypeAgentStatus,
@@ -422,6 +439,57 @@ func (h *Handler) wireAgentCallbacks(proc *agent.Process) {
 				Error:  errMsg,
 			},
 		})
+	}
+}
+
+// ==================== File System Watching ====================
+
+// startDirWatcher 启动文件系统监听器，监听工作目录的变化
+func (h *Handler) startDirWatcher(workDir string) {
+	// 先关闭旧的 watcher
+	if h.dirWatcher != nil {
+		h.dirWatcher.Close()
+		h.dirWatcher = nil
+	}
+
+	if workDir == "" {
+		return
+	}
+
+	dw, err := NewDirWatcher(workDir, func(event FSEventPayload) {
+		h.send(&ServerMessage{
+			Type:    MsgTypeFSEvent,
+			Payload: event,
+		})
+	})
+	if err != nil {
+		log.Printf("[Handler] Failed to start dir watcher for %s: %v", workDir, err)
+		return
+	}
+	h.dirWatcher = dw
+}
+
+// handleWatchDir 处理前端请求监听/取消监听子目录
+func (h *Handler) handleWatchDir(payload json.RawMessage) {
+	var p WatchDirPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		h.sendError("Invalid watch_dir payload")
+		return
+	}
+
+	if h.dirWatcher == nil {
+		return
+	}
+
+	switch p.Action {
+	case "watch":
+		if err := h.dirWatcher.AddDir(p.Path); err != nil {
+			log.Printf("[Handler] Failed to watch dir %s: %v", p.Path, err)
+		}
+	case "unwatch":
+		if err := h.dirWatcher.RemoveDir(p.Path); err != nil {
+			log.Printf("[Handler] Failed to unwatch dir %s: %v", p.Path, err)
+		}
 	}
 }
 

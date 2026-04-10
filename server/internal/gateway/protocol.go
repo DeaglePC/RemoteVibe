@@ -51,6 +51,7 @@ const (
 	MsgTypeFileChange       = "file_change"     // Agent 写入文件时通知前端
 	MsgTypeACPLog           = "acp_log"          // ACP 协议原始日志（TX/RX）
 	MsgTypeGeminiSessions   = "gemini_sessions"  // Gemini CLI 原生会话列表
+	MsgTypeFSEvent          = "fs_event"         // 文件系统变化事件（fsnotify 推送）
 )
 
 // AgentStatusPayload reports agent connection state
@@ -157,6 +158,20 @@ type FileChangePayload struct {
 type ToolCallLocationWS struct {
 	Path string `json:"path"`
 	Line int    `json:"line,omitempty"`
+}
+
+// FSEventPayload 通知前端文件系统发生了变化
+type FSEventPayload struct {
+	Path   string `json:"path"`   // 变化的文件/目录完整路径
+	Dir    string `json:"dir"`    // 变化所在的父目录路径
+	Name   string `json:"name"`   // 文件/目录名
+	Action string `json:"action"` // "create", "remove", "modify"
+}
+
+// WatchDirPayload 前端请求监听/取消监听子目录
+type WatchDirPayload struct {
+	Path   string `json:"path"`
+	Action string `json:"action"` // "watch" 或 "unwatch"
 }
 
 // ==================== Gemini CLI Native Session Types ====================

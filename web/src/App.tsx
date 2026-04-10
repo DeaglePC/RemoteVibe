@@ -307,6 +307,7 @@ export default function App() {
                       rootPath={activeWorkDir}
                       onClose={handleCloseFileBrowser}
                       onFileOpen={handleFileOpen}
+                      onSendWS={send}
                     />
                   </div>
                 </Allotment.Pane>

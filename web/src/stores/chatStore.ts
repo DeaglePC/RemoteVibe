@@ -8,6 +8,7 @@ import type {
   GeminiSessionInfo,
   FileChangePayload,
   ACPLogPayload,
+  FSEventPayload,
 } from '../types/protocol';
 
 // ==================== Message Types ====================
@@ -23,6 +24,7 @@ export interface ChatMessage {
 
 export interface ToolCallState extends ToolCallPayload {
   // inherited: toolCallId, title, kind, status, content
+  createdAt: number; // 创建时间戳，用于时间线排序
 }
 
 // ==================== Session Types ====================
@@ -87,9 +89,14 @@ function serializeSession(session: Session): SerializedSession {
 
 /** 将序列化数据还原为 Session 对象 */
 function deserializeSession(data: SerializedSession): Session {
+  // 兼容旧数据：tool call 可能没有 createdAt 字段
+  const rawToolCalls = data.toolCalls || [];
+  const toolCalls = new Map(
+    rawToolCalls.map(([key, tc]) => [key, { ...tc, createdAt: tc.createdAt || data.createdAt || 0 }])
+  );
   return {
     ...data,
-    toolCalls: new Map(data.toolCalls || []),
+    toolCalls,
     pendingPermissions: [], // 历史会话不恢复权限请求
     isAgentThinking: false,
     agentStatus: data.agentStatus === 'running' ? 'stopped' : (data.agentStatus || 'stopped'),
@@ -243,6 +250,12 @@ interface ChatState {
   clearACPLogs: () => void;
   showACPLogs: boolean;
   setShowACPLogs: (show: boolean) => void;
+
+  // 文件系统事件 — 由 fsnotify 推送的目录变化
+  // 存储最近一次变化事件（每次有新事件时递增版本号，让订阅者能检测变化）
+  lastFSEvent: FSEventPayload | null;
+  fsEventVersion: number;
+  emitFSEvent: (event: FSEventPayload) => void;
 }
 
 let messageIdCounter = 0;
@@ -515,7 +528,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   addToolCall: (tc) =>
     set((s) => {
       const m = new Map(s.toolCalls);
-      m.set(tc.toolCallId, tc);
+      m.set(tc.toolCallId, { ...tc, createdAt: Date.now() });
       return { toolCalls: m };
     }),
   updateToolCall: (toolCallId, status, content) =>
@@ -589,4 +602,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearACPLogs: () => set({ acpLogs: [] }),
   showACPLogs: false,
   setShowACPLogs: (show) => set({ showACPLogs: show }),
+
+  // 文件系统事件
+  lastFSEvent: null,
+  fsEventVersion: 0,
+  emitFSEvent: (event) =>
+    set((s) => ({
+      lastFSEvent: event,
+      fsEventVersion: s.fsEventVersion + 1,
+    })),
 }));

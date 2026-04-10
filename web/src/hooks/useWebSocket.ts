@@ -16,6 +16,7 @@ import type {
   TurnCompletePayload,
   ACPLogPayload,
   GeminiSessionsPayload,
+  FSEventPayload,
 } from '../types/protocol';
 import { MSG } from '../types/protocol';
 
@@ -220,6 +221,12 @@ export function useWebSocket() {
       case MSG.FILE_CHANGE: {
         const p = msg.payload as FileChangePayload;
         s.addFileChange(p);
+        break;
+      }
+
+      case MSG.FS_EVENT: {
+        const p = msg.payload as FSEventPayload;
+        s.emitFSEvent(p);
         break;
       }
 
