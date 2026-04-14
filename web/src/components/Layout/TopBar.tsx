@@ -836,6 +836,11 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
           sessions={sessions.filter(
             (s) => s.workDir === pendingWorkDir && s.messages.length > 0
           )}
+          agents={agents}
+          selectedAgentId={activeAgent?.id || null}
+          onAgentChange={(agentId) => {
+            useChatStore.getState().setActiveAgentId(agentId);
+          }}
           onRestoreSession={handleRestoreAndStart}
           onResumeGeminiSession={handleResumeGeminiSession}
           onNewSession={() => startNewSession(pendingWorkDir)}

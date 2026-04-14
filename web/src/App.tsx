@@ -17,6 +17,7 @@ export default function App() {
   const { send } = useWebSocket();
   const agentStatus = useChatStore((s) => s.agentStatus);
   const isThinking = useChatStore((s) => s.isAgentThinking);
+  const agentActivity = useChatStore((s) => s.agentActivity);
   const showFileBrowser = useChatStore((s) => s.showFileBrowser);
   const activeWorkDir = useChatStore((s) => s.activeWorkDir);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
@@ -63,41 +64,83 @@ export default function App() {
     const cmdDef = SLASH_COMMANDS.find((c) => c.id === commandId);
 
     if (cmdDef?.scope === 'agent') {
-      if (agentStatus !== 'running') {
+      if (cmdDef.webAction === 'prompt') {
+        // 通过自然语言 prompt 发送给 Gemini CLI 实现近似效果
+        if (agentStatus !== 'running') {
+          store.addMessage({
+            id: genMessageId(),
+            role: 'system',
+            content: `⚠️ Agent is not running. Start an agent first to use \`${cmdDef.name}\`.`,
+            timestamp: Date.now(),
+          });
+          return;
+        }
+        // 先显示用户执行了哪个命令
         store.addMessage({
           id: genMessageId(),
           role: 'system',
-          content: `⚠️ Agent is not running. Start an agent first to use ${cmdDef.name}.`,
+          content: `${cmdDef.icon} Executing \`${cmdDef.name}\` — sending equivalent prompt to agent...`,
           timestamp: Date.now(),
         });
-        return;
+        handleSendPrompt(cmdDef.webPrompt || cmdDef.description);
+      } else {
+        // webAction === 'info' 或未设置：显示提示信息
+        const info = cmdDef.webInfo
+          || `\`${cmdDef.name}\` is a Gemini CLI terminal command and is not available in Web mode.\n\n💡 Tip: Run \`gemini ${cmdDef.name}\` in your terminal to use this feature.`;
+        store.addMessage({
+          id: genMessageId(),
+          role: 'system',
+          content: `${cmdDef.icon} ${info}`,
+          timestamp: Date.now(),
+        });
       }
-      handleSendPrompt(cmdDef.name);
       return;
     }
 
     switch (commandId) {
       case 'help': {
         const localCmds = SLASH_COMMANDS.filter((c) => c.scope === 'local');
-        const agentCmds = SLASH_COMMANDS.filter((c) => c.scope === 'agent');
-        const agentGroups = new Map<string, typeof agentCmds>();
-        for (const cmd of agentCmds) {
-          const group = agentGroups.get(cmd.group) || [];
-          group.push(cmd);
-          agentGroups.set(cmd.group, group);
-        }
+        const promptCmds = SLASH_COMMANDS.filter((c) => c.scope === 'agent' && c.webAction === 'prompt');
+        const infoCmds = SLASH_COMMANDS.filter((c) => c.scope === 'agent' && c.webAction !== 'prompt');
+
         let helpText = '📖 **Available Commands**\n\n';
         helpText += '**App Commands** (handled locally):\n';
         for (const cmd of localCmds) {
           helpText += `  \`${cmd.name}\` — ${cmd.description}\n`;
         }
-        helpText += '\n**Gemini CLI Commands** (sent to agent):\n';
-        for (const [group, cmds] of agentGroups) {
-          helpText += `\n*${group}:*\n`;
-          for (const cmd of cmds) {
-            helpText += `  \`${cmd.name}\` — ${cmd.description}\n`;
+
+        if (promptCmds.length > 0) {
+          helpText += '\n**Gemini CLI Commands** (available via prompt):\n';
+          const promptGroups = new Map<string, typeof promptCmds>();
+          for (const cmd of promptCmds) {
+            const group = promptGroups.get(cmd.group) || [];
+            group.push(cmd);
+            promptGroups.set(cmd.group, group);
+          }
+          for (const [group, cmds] of promptGroups) {
+            helpText += `\n*${group}:*\n`;
+            for (const cmd of cmds) {
+              helpText += `  \`${cmd.name}\` — ${cmd.description}\n`;
+            }
           }
         }
+
+        if (infoCmds.length > 0) {
+          helpText += '\n**Gemini CLI Commands** (terminal only, info in Web mode):\n';
+          const infoGroups = new Map<string, typeof infoCmds>();
+          for (const cmd of infoCmds) {
+            const group = infoGroups.get(cmd.group) || [];
+            group.push(cmd);
+            infoGroups.set(cmd.group, group);
+          }
+          for (const [group, cmds] of infoGroups) {
+            helpText += `\n*${group}:*\n`;
+            for (const cmd of cmds) {
+              helpText += `  \`${cmd.name}\` — ${cmd.description}\n`;
+            }
+          }
+        }
+
         store.addMessage({ id: genMessageId(), role: 'system', content: helpText, timestamp: Date.now() });
         break;
       }
@@ -278,6 +321,7 @@ export default function App() {
                 disabled={!isAgentRunning}
                 isThinking={isThinking}
                 onCancel={handleCancel}
+                agentActivity={agentActivity}
               />
             </div>
           )}
@@ -339,6 +383,7 @@ export default function App() {
                         disabled={!isAgentRunning}
                         isThinking={isThinking}
                         onCancel={handleCancel}
+                        agentActivity={agentActivity}
                       />
                     </div>
                   </Allotment.Pane>

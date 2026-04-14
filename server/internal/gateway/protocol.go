@@ -67,9 +67,11 @@ type AgentListPayload struct {
 }
 
 type AgentInfo struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Status  string `json:"status"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Mode      string `json:"mode,omitempty"`      // "acp" 或 "cli"，帮助前端区分通信模式
+	Available bool   `json:"available"`            // 命令是否在 PATH 中可用
 }
 
 // MessageChunkPayload streams text from the agent
@@ -118,8 +120,20 @@ type PermissionOption struct {
 
 // TurnCompletePayload signals end of a prompt turn
 type TurnCompletePayload struct {
-	StopReason   string `json:"stopReason"`
-	ErrorMessage string `json:"errorMessage,omitempty"` // 当 StopReason == "error" 时携带详情
+	StopReason   string            `json:"stopReason"`
+	ErrorMessage string            `json:"errorMessage,omitempty"` // 当 StopReason == "error" 时携带详情
+	Stats        *TurnStatsPayload `json:"stats,omitempty"`        // result 事件的统计信息
+}
+
+// TurnStatsPayload 是发送给前端的 turn 统计信息
+type TurnStatsPayload struct {
+	TotalTokens  int    `json:"totalTokens,omitempty"`
+	InputTokens  int    `json:"inputTokens,omitempty"`
+	OutputTokens int    `json:"outputTokens,omitempty"`
+	CachedTokens int    `json:"cachedTokens,omitempty"`
+	DurationMs   int    `json:"durationMs,omitempty"`
+	ToolCalls    int    `json:"toolCalls,omitempty"`
+	Model        string `json:"model,omitempty"`
 }
 
 // PlanUpdatePayload shows the agent's plan

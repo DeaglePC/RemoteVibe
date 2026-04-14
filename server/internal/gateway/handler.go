@@ -3,11 +3,11 @@ package gateway
 import (
 	"encoding/json"
 	"log"
+	"os/exec"
 	"time"
 
 	"github.com/gorilla/websocket"
 
-	"agentinhand/internal/acp"
 	"agentinhand/internal/agent"
 )
 
@@ -144,13 +144,12 @@ func (h *Handler) handleStartAgent(payload json.RawMessage) {
 		},
 	})
 
-	// 异步执行启动逻辑，避免阻塞 readLoop（防止 startInternal 卡住时无法处理其他消息）
+	// 异步执行启动逻辑，避免阻塞 readLoop
 	go func() {
 		var proc *agent.Process
 		var err error
 
 		if p.GeminiSessionID != "" {
-			// 恢复 Gemini CLI 原生会话
 			log.Printf("[Handler] Starting agent with resume: sessionID=%s", p.GeminiSessionID)
 			proc, err = h.server.mgr.StartAgentWithResume(p.AgentID, p.WorkDir, p.GeminiSessionID)
 		} else {
@@ -174,8 +173,8 @@ func (h *Handler) handleStartAgent(payload json.RawMessage) {
 		log.Printf("[Handler] Agent started successfully, wiring callbacks")
 		h.agent = proc
 
-		// Wire up ACP callbacks → WebSocket messages
-		h.wireAgentCallbacks(proc)
+		// 将 Backend 回调桥接到 WebSocket 消息
+		h.wireBackendCallbacks(proc)
 
 		// 启动文件系统监听器
 		h.startDirWatcher(p.WorkDir)
@@ -232,17 +231,17 @@ func (h *Handler) handleSendPrompt(payload json.RawMessage) {
 
 	log.Printf("[Handler] handleSendPrompt: agent state=%s", h.agent.State())
 
-	client := h.agent.Client()
-	if client == nil {
-		log.Printf("[Handler] handleSendPrompt: client is nil")
+	backend := h.agent.Backend()
+	if backend == nil {
+		log.Printf("[Handler] handleSendPrompt: backend is nil")
 		h.sendError("Agent not ready")
 		return
 	}
 
-	log.Printf("[Handler] handleSendPrompt: client sessionID=%s, sending text=%q",
-		client.SessionID(), p.Text[:min(len(p.Text), 50)])
+	log.Printf("[Handler] handleSendPrompt: mode=%s, sessionID=%s, sending text=%q",
+		backend.Mode(), backend.SessionID(), p.Text[:min(len(p.Text), 50)])
 
-	if err := client.SendPrompt(p.Text); err != nil {
+	if err := backend.SendPrompt(p.Text); err != nil {
 		log.Printf("[Handler] handleSendPrompt: SendPrompt failed: %v", err)
 		h.sendError("Failed to send prompt: " + err.Error())
 	}
@@ -260,13 +259,13 @@ func (h *Handler) handlePermissionResponse(payload json.RawMessage) {
 		return
 	}
 
-	client := h.agent.Client()
-	if client == nil {
+	backend := h.agent.Backend()
+	if backend == nil {
 		h.sendError("Agent not ready")
 		return
 	}
 
-	if err := client.RespondPermission(p.RequestID, p.OptionID); err != nil {
+	if err := backend.RespondPermission(p.RequestID, p.OptionID); err != nil {
 		h.sendError("Failed to send permission response: " + err.Error())
 	}
 }
@@ -276,170 +275,183 @@ func (h *Handler) handleCancel() {
 		return
 	}
 
-	client := h.agent.Client()
-	if client != nil {
-		client.Cancel()
+	backend := h.agent.Backend()
+	if backend != nil {
+		backend.Cancel()
 	}
 }
 
-// ==================== ACP → WebSocket Bridging ====================
+// ==================== Backend → WebSocket Bridging ====================
 
-func (h *Handler) wireAgentCallbacks(proc *agent.Process) {
-	client := proc.Client()
-	if client == nil {
+// wireBackendCallbacks 将 Backend 的回调桥接到 WebSocket 消息。
+// 无论是 ACP 还是 CLI 模式，都使用相同的 WebSocket 协议格式。
+func (h *Handler) wireBackendCallbacks(proc *agent.Process) {
+	backend := proc.Backend()
+	if backend == nil {
 		return
 	}
 
-	client.OnMessageChunk = func(chunk *acp.AgentMessageChunk) {
-		h.send(&ServerMessage{
-			Type:    MsgTypeMessageChunk,
-			Payload: MessageChunkPayload{Text: chunk.Content.Text},
-		})
-	}
+	backend.SetCallbacks(&agent.BackendCallbacks{
+		OnMessageChunk: func(text string) {
+			h.send(&ServerMessage{
+				Type:    MsgTypeMessageChunk,
+				Payload: MessageChunkPayload{Text: text},
+			})
+		},
 
-	client.OnThoughtChunk = func(chunk *acp.AgentThoughtChunk) {
-		// agent 的思考/推理过程，使用独立的 thought_chunk 类型
-		h.send(&ServerMessage{
-			Type:    MsgTypeThoughtChunk,
-			Payload: MessageChunkPayload{Text: chunk.Content.Text},
-		})
-	}
+		OnThoughtChunk: func(text string) {
+			h.send(&ServerMessage{
+				Type:    MsgTypeThoughtChunk,
+				Payload: MessageChunkPayload{Text: text},
+			})
+		},
 
-	client.OnToolCall = func(tc *acp.ToolCall) {
-		content := convertToolCallContent(tc.Content)
-		locations := convertToolCallLocations(tc.Locations)
-		h.send(&ServerMessage{
-			Type: MsgTypeToolCall,
-			Payload: ToolCallPayload{
-				ToolCallID: tc.ToolCallID,
-				Title:      tc.Title,
-				Kind:       tc.Kind,
-				Status:     tc.Status,
-				Content:    content,
-				Locations:  locations,
-			},
-		})
-	}
+		OnToolCall: func(tc *agent.ToolCallEvent) {
+			content := convertBackendToolCallContent(tc.Content)
+			locations := convertBackendToolCallLocations(tc.Locations)
+			h.send(&ServerMessage{
+				Type: MsgTypeToolCall,
+				Payload: ToolCallPayload{
+					ToolCallID: tc.ToolCallID,
+					Title:      tc.Title,
+					Kind:       tc.Kind,
+					Status:     tc.Status,
+					Content:    content,
+					Locations:  locations,
+				},
+			})
+		},
 
-	client.OnToolCallUpdate = func(tcu *acp.ToolCallStatusUpdate) {
-		content := convertToolCallContent(tcu.Content)
-		h.send(&ServerMessage{
-			Type: MsgTypeToolCallUpdate,
-			Payload: ToolCallUpdatePayload{
-				ToolCallID: tcu.ToolCallID,
-				Status:     tcu.Status,
-				Content:    content,
-			},
-		})
-	}
+		OnToolCallUpdate: func(tcu *agent.ToolCallUpdateEvent) {
+			content := convertBackendToolCallContent(tcu.Content)
+			h.send(&ServerMessage{
+				Type: MsgTypeToolCallUpdate,
+				Payload: ToolCallUpdatePayload{
+					ToolCallID: tcu.ToolCallID,
+					Status:     tcu.Status,
+					Content:    content,
+				},
+			})
+		},
 
-	client.OnPlanUpdate = func(plan *acp.PlanUpdate) {
-		entries := make([]PlanEntryWS, len(plan.Entries))
-		for i, e := range plan.Entries {
-			entries[i] = PlanEntryWS{
-				Content:  e.Content,
-				Priority: e.Priority,
-				Status:   e.Status,
+		OnPlanUpdate: func(entries []agent.PlanEntryEvent) {
+			wsEntries := make([]PlanEntryWS, len(entries))
+			for i, e := range entries {
+				wsEntries[i] = PlanEntryWS{
+					Content:  e.Content,
+					Priority: e.Priority,
+					Status:   e.Status,
+				}
 			}
-		}
-		h.send(&ServerMessage{
-			Type:    MsgTypePlanUpdate,
-			Payload: PlanUpdatePayload{Entries: entries},
-		})
-	}
+			h.send(&ServerMessage{
+				Type:    MsgTypePlanUpdate,
+				Payload: PlanUpdatePayload{Entries: wsEntries},
+			})
+		},
 
-	client.OnPermissionReq = func(id interface{}, params *acp.PermissionRequestParams) {
-		options := make([]PermissionOption, len(params.Options))
-		for i, o := range params.Options {
-			options[i] = PermissionOption{
-				OptionID: o.OptionID,
-				Name:     o.Name,
-				Kind:     o.Kind,
+		OnPermissionReq: func(id any, toolCallID string, options []agent.PermOptionEvent) {
+			wsOptions := make([]PermissionOption, len(options))
+			for i, o := range options {
+				wsOptions[i] = PermissionOption{
+					OptionID: o.OptionID,
+					Name:     o.Name,
+					Kind:     o.Kind,
+				}
 			}
-		}
-		h.send(&ServerMessage{
-			Type: MsgTypePermissionReq,
-			Payload: PermissionRequestPayload{
-				RequestID:  id,
-				ToolCallID: params.ToolCall.ToolCallID,
-				Options:    options,
-			},
-		})
-	}
+			h.send(&ServerMessage{
+				Type: MsgTypePermissionReq,
+				Payload: PermissionRequestPayload{
+					RequestID:  id,
+					ToolCallID: toolCallID,
+					Options:    wsOptions,
+				},
+			})
+		},
 
-	client.OnACPLog = func(direction string, message string) {
-		h.send(&ServerMessage{
-			Type: MsgTypeACPLog,
-			Payload: ACPLogPayload{
-				Direction: direction,
-				Message:   message,
-				Timestamp: time.Now().UnixMilli(),
-			},
-		})
-	}
+		OnTurnComplete: func(stopReason string, errorMessage string, stats *agent.TurnStats) {
+			payload := TurnCompletePayload{
+				StopReason:   stopReason,
+				ErrorMessage: errorMessage,
+			}
+			if stats != nil {
+				payload.Stats = &TurnStatsPayload{
+					TotalTokens:  stats.TotalTokens,
+					InputTokens:  stats.InputTokens,
+					OutputTokens: stats.OutputTokens,
+					CachedTokens: stats.CachedTokens,
+					DurationMs:   stats.DurationMs,
+					ToolCalls:    stats.ToolCalls,
+					Model:        stats.Model,
+				}
+			}
+			h.send(&ServerMessage{
+				Type:    MsgTypeTurnComplete,
+				Payload: payload,
+			})
+		},
 
-	client.OnUnknownEvent = func(eventType string, rawJSON string) {
-		// 未知事件作为 acp_log 的 rx 日志推送前端，让用户能看到所有协议交互
-		h.send(&ServerMessage{
-			Type: MsgTypeACPLog,
-			Payload: ACPLogPayload{
-				Direction: "rx",
-				Message:   rawJSON,
-				Timestamp: time.Now().UnixMilli(),
-			},
-		})
-	}
+		OnFileChange: func(path string, oldContent string, newContent string, isCreate bool) {
+			action := "write"
+			if isCreate {
+				action = "create"
+			}
+			const maxDiffSize = 512 * 1024
+			payload := FileChangePayload{
+				Path:   path,
+				Action: action,
+				Size:   len(newContent),
+			}
+			if len(oldContent)+len(newContent) <= maxDiffSize {
+				payload.OldText = oldContent
+				payload.NewText = newContent
+			}
+			h.send(&ServerMessage{
+				Type:    MsgTypeFileChange,
+				Payload: payload,
+			})
+		},
 
-	client.OnFileChange = func(path string, oldContent string, newContent string, isCreate bool) {
-		action := "write"
-		if isCreate {
-			action = "create"
-		}
-		// 对大文件不传完整内容，只发路径和 action
-		const maxDiffSize = 512 * 1024 // 512KB
-		payload := FileChangePayload{
-			Path:   path,
-			Action: action,
-			Size:   len(newContent),
-		}
-		if len(oldContent)+len(newContent) <= maxDiffSize {
-			payload.OldText = oldContent
-			payload.NewText = newContent
-		}
-		h.send(&ServerMessage{
-			Type:    MsgTypeFileChange,
-			Payload: payload,
-		})
-	}
+		OnProtocolLog: func(direction string, message string) {
+			h.send(&ServerMessage{
+				Type: MsgTypeACPLog,
+				Payload: ACPLogPayload{
+					Direction: direction,
+					Message:   message,
+					Timestamp: time.Now().UnixMilli(),
+				},
+			})
+		},
 
-	client.OnTurnComplete = func(result *acp.SessionPromptResult) {
-		h.send(&ServerMessage{
-			Type: MsgTypeTurnComplete,
-			Payload: TurnCompletePayload{
-				StopReason:   result.StopReason,
-				ErrorMessage: result.ErrorMessage,
-			},
-		})
-	}
+		OnUnknownEvent: func(eventType string, rawJSON string) {
+			h.send(&ServerMessage{
+				Type: MsgTypeACPLog,
+				Payload: ACPLogPayload{
+					Direction: "rx",
+					Message:   rawJSON,
+					Timestamp: time.Now().UnixMilli(),
+				},
+			})
+		},
 
-	client.OnDisconnect = func(err error) {
-		errMsg := ""
-		if err != nil {
-			errMsg = err.Error()
-		}
-		// 先发送 turn_complete，确保前端退出 thinking 状态
-		h.send(&ServerMessage{
-			Type:    MsgTypeTurnComplete,
-			Payload: TurnCompletePayload{StopReason: "disconnected"},
-		})
-		h.send(&ServerMessage{
-			Type: MsgTypeAgentStatus,
-			Payload: AgentStatusPayload{
-				Status: "disconnected",
-				Error:  errMsg,
-			},
-		})
-	}
+		OnDisconnect: func(err error) {
+			errMsg := ""
+			if err != nil {
+				errMsg = err.Error()
+			}
+			// 先发送 turn_complete，确保前端退出 thinking 状态
+			h.send(&ServerMessage{
+				Type:    MsgTypeTurnComplete,
+				Payload: TurnCompletePayload{StopReason: "disconnected"},
+			})
+			h.send(&ServerMessage{
+				Type: MsgTypeAgentStatus,
+				Payload: AgentStatusPayload{
+					Status: "disconnected",
+					Error:  errMsg,
+				},
+			})
+		},
+	})
 }
 
 // ==================== File System Watching ====================
@@ -503,10 +515,19 @@ func (h *Handler) sendAgentList() {
 		if proc := h.server.mgr.GetAgent(a.ID); proc != nil {
 			status = string(proc.State())
 		}
+		mode := a.Mode
+		if mode == "" {
+			mode = "acp"
+		}
+		// 检测命令是否在 PATH 中可用
+		_, lookErr := exec.LookPath(a.Command)
+		available := lookErr == nil
 		list[i] = AgentInfo{
-			ID:     a.ID,
-			Name:   a.Name,
-			Status: status,
+			ID:        a.ID,
+			Name:      a.Name,
+			Status:    status,
+			Mode:      mode,
+			Available: available,
 		}
 	}
 
@@ -559,34 +580,26 @@ func sendToClient(c *ClientConn, msg *ServerMessage) {
 	}
 }
 
-func convertToolCallContent(items []acp.ToolCallContent) []ToolCallContentWS {
+// convertBackendToolCallContent 将 Backend 事件的工具调用内容转为 WS 格式
+func convertBackendToolCallContent(items []agent.ToolCallContentEvent) []ToolCallContentWS {
 	if len(items) == 0 {
 		return nil
 	}
 	result := make([]ToolCallContentWS, len(items))
 	for i, item := range items {
-		ws := ToolCallContentWS{Type: item.Type}
-		switch item.Type {
-		case "content":
-			if item.Content != nil {
-				ws.Type = "text"
-				ws.Text = item.Content.Text
-			}
-		case "diff":
-			ws.Path = item.Path
-			ws.OldText = item.OldText
-			ws.NewText = item.NewText
-		case "terminal":
-			ws.Type = "terminal"
-			ws.Text = item.TerminalID
+		result[i] = ToolCallContentWS{
+			Type:    item.Type,
+			Text:    item.Text,
+			Path:    item.Path,
+			OldText: item.OldText,
+			NewText: item.NewText,
 		}
-		result[i] = ws
 	}
 	return result
 }
 
-// convertToolCallLocations 将 ACP ToolCallLocation 转为前端格式
-func convertToolCallLocations(items []acp.ToolCallLocation) []ToolCallLocationWS {
+// convertBackendToolCallLocations 将 Backend 事件的位置信息转为 WS 格式
+func convertBackendToolCallLocations(items []agent.ToolCallLocationEvent) []ToolCallLocationWS {
 	if len(items) == 0 {
 		return nil
 	}

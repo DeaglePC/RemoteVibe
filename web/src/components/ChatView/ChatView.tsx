@@ -3,6 +3,7 @@ import { useChatStore, type ToolCallState } from '../../stores/chatStore';
 import type { ChatMessage } from '../../stores/chatStore';
 import MessageBubble from './MessageBubble';
 import ThinkingBlock from './ThinkingBlock';
+import TurnStatsBar from './TurnStatsBar';
 import ToolCallCard from '../Cards/ToolCallCard';
 import CommandConfirmCard from '../Cards/CommandConfirmCard';
 import DiffViewerCard from '../Cards/DiffViewerCard';
@@ -106,6 +107,9 @@ export default function ChatView({ onPermissionRespond }: Props) {
       {(isThinking || thinkingContent) && (
         <ThinkingBlock content={thinkingContent} isActive={isThinking} />
       )}
+
+      {/* Turn stats — shows token usage, duration etc. after agent completes */}
+      {!isThinking && <TurnStatsBar />}
 
       {/* Active tool calls (pending / in_progress) — 始终显示在底部 */}
       {Array.from(toolCalls.values())

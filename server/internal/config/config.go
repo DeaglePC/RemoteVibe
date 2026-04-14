@@ -30,6 +30,7 @@ type AgentDef struct {
 	Name    string   `yaml:"name"`
 	Command string   `yaml:"command"`
 	Args    []string `yaml:"args"`
+	Mode    string   `yaml:"mode"` // "acp" (默认，JSON-RPC 2.0) 或 "cli" (pipe/stream-json)
 }
 
 // Default returns a sane default configuration
@@ -45,9 +46,31 @@ func Default() *Config {
 		Agents: []AgentDef{
 			{
 				ID:      "gemini",
-				Name:    "Gemini CLI",
+				Name:    "Gemini CLI (ACP)",
 				Command: "gemini",
 				Args:    []string{"--acp"},
+				Mode:    "acp",
+			},
+			{
+				ID:      "claude",
+				Name:    "Claude Code",
+				Command: "claude",
+				Args:    []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions"},
+				Mode:    "cli",
+			},
+			{
+				ID:      "gemini-cli",
+				Name:    "Gemini CLI",
+				Command: "gemini",
+				Args:    []string{"-p", "--yolo", "-o", "stream-json"},
+				Mode:    "cli",
+			},
+			{
+				ID:      "codex",
+				Name:    "Codex CLI",
+				Command: "codex",
+				Args:    []string{"--quiet"},
+				Mode:    "cli",
 			},
 		},
 	}

@@ -115,6 +115,7 @@ export function useWebSocket() {
           // 收到的 session/update 通知把 isAgentThinking 置为 true 后无法恢复
           s.setIsAgentThinking(false);
           s.clearThinkingContent();
+          s.setAgentActivity('idle');
           s.addMessage({
             id: genMessageId(),
             role: 'system',
@@ -133,6 +134,7 @@ export function useWebSocket() {
           // Agent 停止或断开时，确保退出 thinking 状态
           s.setIsAgentThinking(false);
           s.clearThinkingContent();
+          s.setAgentActivity('idle');
           s.addMessage({
             id: genMessageId(),
             role: 'system',
@@ -149,6 +151,8 @@ export function useWebSocket() {
         // thinking 状态由发送 prompt（App.tsx handleSendPrompt）和 THOUGHT_CHUNK 触发，
         // 避免恢复会话时 Gemini CLI 的历史摘要 notification 误触发 thinking 状态
         s.appendToLastAgentMessage(p.text);
+        // 更新活动类型为 streaming（正在输出回复）
+        s.setAgentActivity('streaming');
         break;
       }
 
@@ -156,12 +160,14 @@ export function useWebSocket() {
         const p = msg.payload as MessageChunkPayload;
         s.setIsAgentThinking(true);
         s.appendThinkingContent(p.text);
+        // setIsAgentThinking 已经会设置 agentActivity = 'thinking'
         break;
       }
 
       case MSG.TOOL_CALL: {
         const p = msg.payload as ToolCallPayload;
         s.addToolCall(p);
+        s.setAgentActivity('tool_calling');
         break;
       }
 
@@ -181,6 +187,11 @@ export function useWebSocket() {
         const p = msg.payload as TurnCompletePayload;
         s.setIsAgentThinking(false);
         s.clearThinkingContent();
+        s.setAgentActivity('idle');
+        // 将所有残留的 pending/in_progress 工具调用标记为 completed
+        s.completeAllToolCalls();
+        // 保存统计信息（来自 Gemini CLI result 事件的 stats）
+        s.setLastTurnStats(p.stats || null);
         // 当 stopReason 为 error 时，显示详细错误信息
         if (p.stopReason === 'error' && p.errorMessage) {
           s.setLastError(p.errorMessage);

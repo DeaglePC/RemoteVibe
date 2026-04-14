@@ -1,12 +1,15 @@
 import { useEffect } from 'react';
 import { useChatStore } from '../stores/chatStore';
 import type { Session } from '../stores/chatStore';
-import type { GeminiSessionInfo } from '../types/protocol';
+import type { AgentInfo, GeminiSessionInfo } from '../types/protocol';
 
 interface Props {
   open: boolean;
   workDir: string;
   sessions: Session[];
+  agents: AgentInfo[];
+  selectedAgentId: string | null;
+  onAgentChange: (agentId: string) => void;
   onRestoreSession: (sessionId: string) => void;
   onResumeGeminiSession: (geminiSessionId: string) => void;
   onNewSession: () => void;
@@ -15,15 +18,19 @@ interface Props {
 
 /**
  * SessionPickerModal 在选择工作区后展示该工作区的会话。
- * 包含三部分：
- * 1. 新建会话按钮
- * 2. Gemini CLI 原生会话（可以真正恢复上下文）
- * 3. 本地 UI 历史会话（只恢复聊天记录）
+ * 包含四部分：
+ * 1. Agent 选择器（让用户选择要使用的 AI Agent）
+ * 2. 新建会话按钮
+ * 3. Gemini CLI 原生会话（可以真正恢复上下文，仅 ACP 模式）
+ * 4. 本地 UI 历史会话（只恢复聊天记录）
  */
 export default function SessionPickerModal({
   open,
   workDir,
   sessions,
+  agents,
+  selectedAgentId,
+  onAgentChange,
   onRestoreSession,
   onResumeGeminiSession,
   onNewSession,
@@ -33,12 +40,16 @@ export default function SessionPickerModal({
   const geminiSessions = useChatStore((s) => s.geminiSessions);
   const geminiSessionsLoading = useChatStore((s) => s.geminiSessionsLoading);
 
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
+  // Gemini 相关的 agent（ACP 或 CLI 模式）都支持原生会话恢复
+  const isGeminiAgent = selectedAgent?.id === 'gemini' || selectedAgent?.id === 'gemini-cli';
+
   // 打开弹窗时自动拉取 Gemini CLI 原生会话列表
   useEffect(() => {
-    if (open && workDir) {
+    if (open && workDir && isGeminiAgent) {
       useChatStore.getState().fetchGeminiSessions(workDir);
     }
-  }, [open, workDir]);
+  }, [open, workDir, isGeminiAgent]);
 
   const formatTime = (ts: number) => {
     const d = new Date(ts);
@@ -105,11 +116,105 @@ export default function SessionPickerModal({
           </button>
         </div>
 
+        {/* Agent Selector */}
+        <div className="px-3 sm:px-4 pt-3 flex-shrink-0">
+          <div className="px-1 pb-1.5 text-xs font-medium uppercase tracking-wider"
+            style={{ color: 'var(--color-text-muted)' }}>
+            🤖 Select Agent
+          </div>
+          <div className="flex flex-col gap-1">
+            {agents.map((agent) => {
+              const isSelected = agent.id === selectedAgentId;
+              const isAvailable = agent.available !== false; // 默认可用（兼容旧版后端）
+              const modeLabel = agent.mode === 'cli' ? 'CLI' : agent.mode === 'acp' ? 'ACP' : 'ACP';
+              const modeColor = agent.mode === 'cli'
+                ? { bg: 'oklch(0.55 0.15 160 / 0.2)', text: 'oklch(0.75 0.15 160)' }
+                : { bg: 'oklch(0.55 0.15 270 / 0.2)', text: 'oklch(0.75 0.15 270)' };
+              return (
+                <button
+                  key={agent.id}
+                  onClick={() => isAvailable && onAgentChange(agent.id)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150"
+                  style={{
+                    background: isSelected
+                      ? 'var(--color-surface-2)'
+                      : 'transparent',
+                    border: isSelected
+                      ? '1px solid var(--color-accent-500)'
+                      : '1px solid transparent',
+                    color: 'var(--color-text-primary)',
+                    opacity: isAvailable ? 1 : 0.4,
+                    cursor: isAvailable ? 'pointer' : 'not-allowed',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected && isAvailable) {
+                      e.currentTarget.style.background = 'var(--color-surface-2)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected && isAvailable) {
+                      e.currentTarget.style.background = 'transparent';
+                    }
+                  }}
+                  title={isAvailable ? agent.name : `${agent.name} — not installed on server`}
+                >
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0"
+                    style={{
+                      background: isSelected
+                        ? 'linear-gradient(135deg, var(--color-brand-500), var(--color-accent-500))'
+                        : 'var(--color-surface-3)',
+                    }}
+                  >
+                    {isSelected ? '✓' : '🤖'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium">{agent.name}</span>
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded"
+                        style={{
+                          background: modeColor.bg,
+                          color: modeColor.text,
+                          fontSize: '0.55rem',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {modeLabel}
+                      </span>
+                      {!isAvailable && (
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded"
+                          style={{
+                            background: 'oklch(0.55 0.18 25 / 0.2)',
+                            color: 'var(--color-danger)',
+                            fontSize: '0.55rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          Not installed
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {isSelected && (
+                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: 'var(--color-accent-500)' }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="mx-4 my-2" style={{ borderTop: '1px solid var(--color-border)' }} />
+
         {/* New Session button - always at top */}
-        <div className="px-3 sm:px-4 pt-3 pb-2 flex-shrink-0">
+        <div className="px-3 sm:px-4 pb-2 flex-shrink-0">
           <button
             onClick={onNewSession}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+            disabled={!selectedAgentId}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               background: 'linear-gradient(135deg, var(--color-brand-500), var(--color-accent-500))',
               color: 'white',
@@ -123,7 +228,9 @@ export default function SessionPickerModal({
             </div>
             <div className="min-w-0">
               <div className="text-sm font-medium">New Session</div>
-              <div className="text-xs" style={{ color: 'rgba(255,255,255,0.7)' }}>Start fresh in this workspace</div>
+              <div className="text-xs" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                Start fresh with {selectedAgent?.name || 'selected agent'}
+              </div>
             </div>
           </button>
         </div>
@@ -131,7 +238,7 @@ export default function SessionPickerModal({
         {/* Scrollable sessions area */}
         <div className="flex-1 overflow-y-auto px-3 sm:px-4 pb-3 safe-bottom">
           {/* Gemini CLI Native Sessions */}
-          {geminiSessionsLoading && (
+          {isGeminiAgent && geminiSessionsLoading && (
             <div className="flex items-center gap-2 px-1 py-3">
               <span className="animate-spin text-sm">⟳</span>
               <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -140,7 +247,7 @@ export default function SessionPickerModal({
             </div>
           )}
 
-          {!geminiSessionsLoading && geminiSessions.length > 0 && (
+          {isGeminiAgent && !geminiSessionsLoading && geminiSessions.length > 0 && (
             <>
               <div className="px-1 py-1.5 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5"
                 style={{ color: 'var(--color-text-muted)' }}>
@@ -186,7 +293,7 @@ export default function SessionPickerModal({
           )}
 
           {/* Empty state */}
-          {!geminiSessionsLoading && geminiSessions.length === 0 && sessions.length === 0 && (
+          {(!isGeminiAgent || (!geminiSessionsLoading && geminiSessions.length === 0)) && sessions.length === 0 && (
             <div className="text-center py-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>
               No previous sessions found for this workspace
             </div>

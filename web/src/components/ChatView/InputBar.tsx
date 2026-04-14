@@ -8,13 +8,14 @@ interface Props {
   disabled?: boolean;
   isThinking?: boolean;
   onCancel?: () => void;
+  agentActivity?: 'idle' | 'thinking' | 'streaming' | 'tool_calling';
 }
 
 /**
  * InputBar 是聊天输入框组件。
  * 支持：Enter 发送、Shift+Enter 换行、/ 命令模式下拉框、自动高度调整。
  */
-export default function InputBar({ onSend, onSlashCommand, disabled, isThinking, onCancel }: Props) {
+export default function InputBar({ onSend, onSlashCommand, disabled, isThinking, onCancel, agentActivity = 'idle' }: Props) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -195,7 +196,19 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
                         <span className="text-sm font-medium" style={{ color: 'var(--color-accent-400)', fontFamily: 'var(--font-mono)' }}>
                           {cmd.name}
                         </span>
-                        {cmd.scope === 'agent' && (
+                        {cmd.scope === 'agent' && cmd.webAction === 'prompt' && (
+                          <span
+                            className="text-xs px-1 rounded"
+                            style={{
+                              background: 'oklch(0.55 0.15 160 / 0.2)',
+                              color: 'oklch(0.75 0.15 160)',
+                              fontSize: '0.55rem',
+                            }}
+                          >
+                            PROMPT
+                          </span>
+                        )}
+                        {cmd.scope === 'agent' && cmd.webAction !== 'prompt' && (
                           <span
                             className="text-xs px-1 rounded"
                             style={{
@@ -299,7 +312,13 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
             <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-accent-500)', animationDelay: '150ms' }} />
             <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-accent-500)', animationDelay: '300ms' }} />
           </div>
-          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Agent is thinking...</span>
+          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            {agentActivity === 'streaming'
+              ? 'Agent is responding...'
+              : agentActivity === 'tool_calling'
+                ? 'Agent is using tools...'
+                : 'Agent is thinking...'}
+          </span>
         </div>
       )}
 

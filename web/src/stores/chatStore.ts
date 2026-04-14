@@ -9,6 +9,7 @@ import type {
   FileChangePayload,
   ACPLogPayload,
   FSEventPayload,
+  TurnStats,
 } from '../types/protocol';
 
 // ==================== Message Types ====================
@@ -218,6 +219,8 @@ interface ChatState {
   toolCalls: Map<string, ToolCallState>;
   addToolCall: (tc: ToolCallPayload) => void;
   updateToolCall: (toolCallId: string, status?: string, content?: ToolCallContent[]) => void;
+  /** Turn 结束时将所有 pending/in_progress 的工具调用标记为 completed */
+  completeAllToolCalls: () => void;
 
   // Permission requests
   pendingPermissions: PermissionRequestPayload[];
@@ -234,6 +237,9 @@ interface ChatState {
   thinkingContent: string;
   appendThinkingContent: (text: string) => void;
   clearThinkingContent: () => void;
+  /** Agent 当前活动类型，用于 UI 显示更细粒度的状态 */
+  agentActivity: 'idle' | 'thinking' | 'streaming' | 'tool_calling';
+  setAgentActivity: (activity: ChatState['agentActivity']) => void;
 
   // Error
   lastError: string | null;
@@ -256,6 +262,10 @@ interface ChatState {
   lastFSEvent: FSEventPayload | null;
   fsEventVersion: number;
   emitFSEvent: (event: FSEventPayload) => void;
+
+  // Turn 统计信息 — 来自 Gemini CLI result 事件
+  lastTurnStats: TurnStats | null;
+  setLastTurnStats: (stats: TurnStats | null) => void;
 }
 
 let messageIdCounter = 0;
@@ -543,6 +553,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       return { toolCalls: m };
     }),
+  completeAllToolCalls: () =>
+    set((s) => {
+      let changed = false;
+      const m = new Map(s.toolCalls);
+      for (const [key, tc] of m) {
+        if (tc.status === 'pending' || tc.status === 'in_progress') {
+          m.set(key, { ...tc, status: 'completed' });
+          changed = true;
+        }
+      }
+      return changed ? { toolCalls: m } : {};
+    }),
 
   // Permission requests
   pendingPermissions: [],
@@ -563,11 +585,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isAgentThinking: false,
   setIsAgentThinking: (v) => {
     set({ isAgentThinking: v });
+    if (v) {
+      set({ agentActivity: 'thinking' });
+    } else {
+      set({ agentActivity: 'idle' });
+    }
     // thinking 结束时触发持久化（agent turn 完成）
     if (!v) {
       saveCurrentAndPersist(get());
     }
   },
+  agentActivity: 'idle',
+  setAgentActivity: (activity) => set({ agentActivity: activity }),
   thinkingContent: '',
   appendThinkingContent: (text) => {
     set((s) => ({ thinkingContent: s.thinkingContent + text }));
@@ -611,4 +640,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       lastFSEvent: event,
       fsEventVersion: s.fsEventVersion + 1,
     })),
+
+  // Turn 统计信息
+  lastTurnStats: null,
+  setLastTurnStats: (stats) => set({ lastTurnStats: stats }),
 }));

@@ -166,16 +166,18 @@ export default function ACPLogPanel() {
             return (
               <div
                 key={`${log.timestamp}-${i}`}
-                className="px-3 py-1 cursor-pointer transition-colors hover:opacity-80"
+                className="px-3 py-1"
                 style={{
                   borderBottom: '1px solid var(--color-border)',
                   borderLeft: `3px solid ${isTx ? 'var(--color-accent-500)' : 'var(--color-success)'}`,
                   background: isExpanded ? 'var(--color-surface-1)' : 'transparent',
                 }}
-                onClick={() => setExpandedIdx(isExpanded ? null : i)}
               >
-                {/* Summary line */}
-                <div className="flex items-center gap-2">
+                {/* Summary line — 仅此行可点击展开/折叠 */}
+                <div
+                  className="flex items-center gap-2 cursor-pointer transition-colors hover:opacity-80"
+                  onClick={() => setExpandedIdx(isExpanded ? null : i)}
+                >
                   <span
                     className="text-xs font-bold flex-shrink-0"
                     style={{
