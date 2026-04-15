@@ -3,13 +3,23 @@ import { useChatStore } from '../stores/chatStore';
 import type { Session } from '../stores/chatStore';
 import type { AgentInfo, GeminiSessionInfo } from '../types/protocol';
 
+/** Gemini CLI 可用模型列表 */
+const GEMINI_MODELS = [
+  { id: '', label: 'Default', desc: 'Use CLI default model' },
+  { id: 'gemini-2.5-pro', label: '2.5 Pro', desc: 'Most capable' },
+  { id: 'gemini-2.5-flash', label: '2.5 Flash', desc: 'Fast & balanced' },
+  { id: 'gemini-2.5-flash-lite', label: '2.5 Flash Lite', desc: 'Fastest & cheapest' },
+];
+
 interface Props {
   open: boolean;
   workDir: string;
   sessions: Session[];
   agents: AgentInfo[];
   selectedAgentId: string | null;
+  selectedModel: string;
   onAgentChange: (agentId: string) => void;
+  onModelChange: (model: string) => void;
   onRestoreSession: (sessionId: string) => void;
   onResumeGeminiSession: (geminiSessionId: string) => void;
   onNewSession: () => void;
@@ -30,7 +40,9 @@ export default function SessionPickerModal({
   sessions,
   agents,
   selectedAgentId,
+  selectedModel,
   onAgentChange,
+  onModelChange,
   onRestoreSession,
   onResumeGeminiSession,
   onNewSession,
@@ -205,6 +217,39 @@ export default function SessionPickerModal({
             })}
           </div>
         </div>
+
+        {/* Model Selector — 仅 Gemini agent 显示 */}
+        {isGeminiAgent && (
+          <div className="px-3 sm:px-4 pt-1 flex-shrink-0">
+            <div className="px-1 pb-1 text-xs font-medium uppercase tracking-wider"
+              style={{ color: 'var(--color-text-muted)' }}>
+              🤖 Model
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {GEMINI_MODELS.map((m) => {
+                const isActive = selectedModel === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => onModelChange(m.id)}
+                    className="px-2.5 py-1.5 rounded-lg text-xs transition-all duration-150 cursor-pointer"
+                    style={{
+                      background: isActive ? 'var(--color-surface-2)' : 'transparent',
+                      border: isActive
+                        ? '1px solid var(--color-accent-500)'
+                        : '1px solid var(--color-border)',
+                      color: isActive ? 'var(--color-accent-400)' : 'var(--color-text-secondary)',
+                      fontWeight: isActive ? 600 : 400,
+                    }}
+                    title={m.desc}
+                  >
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Divider */}
         <div className="mx-4 my-2" style={{ borderTop: '1px solid var(--color-border)' }} />

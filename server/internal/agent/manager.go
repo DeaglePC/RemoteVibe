@@ -35,18 +35,15 @@ func (m *Manager) GetAgent(agentID string) *Process {
 	return m.agents[agentID]
 }
 
+// StartOptions 是启动 Agent 的参数
+type StartOptions struct {
+	WorkDir         string
+	GeminiSessionID string // 非空时恢复 Gemini CLI 原生会话
+	Model           string // 指定模型（如 gemini-2.5-pro），空字符串使用默认
+}
+
 // StartAgent launches an agent process
-func (m *Manager) StartAgent(agentID string, workDir string) (*Process, error) {
-	return m.startAgentInternal(agentID, workDir, "")
-}
-
-// StartAgentWithResume 启动 Agent 并恢复已有的 Gemini CLI 会话
-func (m *Manager) StartAgentWithResume(agentID string, workDir string, geminiSessionID string) (*Process, error) {
-	return m.startAgentInternal(agentID, workDir, geminiSessionID)
-}
-
-// startAgentInternal 是启动 Agent 的内部方法
-func (m *Manager) startAgentInternal(agentID string, workDir string, geminiSessionID string) (*Process, error) {
+func (m *Manager) StartAgent(agentID string, opts StartOptions) (*Process, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -69,18 +66,12 @@ func (m *Manager) startAgentInternal(agentID string, workDir string, geminiSessi
 
 	// Create and start process
 	proc := NewProcess(*agentDef)
-	var err error
-	if geminiSessionID != "" {
-		err = proc.StartWithResume(workDir, geminiSessionID)
-	} else {
-		err = proc.Start(workDir)
-	}
-	if err != nil {
+	if err := proc.Start(opts); err != nil {
 		return nil, fmt.Errorf("start agent %s: %w", agentID, err)
 	}
 
 	m.agents[agentID] = proc
-	log.Printf("[Manager] Agent %s started", agentID)
+	log.Printf("[Manager] Agent %s started (model=%s)", agentID, opts.Model)
 	return proc, nil
 }
 

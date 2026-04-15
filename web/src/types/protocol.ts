@@ -11,6 +11,7 @@ export interface StartAgentPayload {
   agentId: string;
   workDir?: string;
   geminiSessionId?: string; // 非空时恢复 Gemini CLI 原生会话
+  model?: string;           // 指定模型（如 gemini-2.5-pro），空字符串使用默认
 }
 
 export interface SendPromptPayload {

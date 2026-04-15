@@ -91,6 +91,11 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
   }, [onSlashCommand]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // 输入法正在组合中（选词/拼音阶段），不处理 Enter 等按键
+    if (e.nativeEvent.isComposing || e.keyCode === 229) {
+      return;
+    }
+
     // 命令面板导航
     if (showCommands) {
       if (e.key === 'ArrowDown') {

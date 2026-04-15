@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"agentinhand/internal/config"
@@ -33,6 +34,7 @@ type CLIBackend struct {
 	sessionID  string
 	toolCallID int    // 自增的工具调用 ID 计数器
 	workDir    string // 工作目录
+	model      string // 运行时指定的模型名（空字符串使用 agent 默认）
 	turnCount  int    // 已执行的 prompt 次数（用于判断是否需要 --resume）
 }
 
@@ -61,19 +63,19 @@ func (b *CLIBackend) SessionID() string {
 
 // Start 初始化 CLI 后端（不启动进程，进程在 SendPrompt 时启动）。
 // 参照 Multica 的设计：所有 CLI Agent 都是"每次 prompt 一个进程"。
-func (b *CLIBackend) Start(workDir string, sessionID string) error {
+func (b *CLIBackend) Start(workDir string, sessionID string, model string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// 根据 Agent 类型选择解析器，并传入 session ID 回调
-	// 当 Gemini CLI 的 init 事件返回真正的 session_id 时，更新 CLIBackend 的 sessionID
-	b.parser = NewStreamParser(b.def.ID, func(sessionID string) {
+	b.parser = NewStreamParser(b.def.ID, func(sid string) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		log.Printf("[CLIBackend] Received real session ID from init event: %s (was: %s)", sessionID, b.sessionID)
-		b.sessionID = sessionID
+		log.Printf("[CLIBackend] Received real session ID from init event: %s (was: %s)", sid, b.sessionID)
+		b.sessionID = sid
 	})
 	b.workDir = workDir
+	b.model = model
 
 	// 记录外部传入的 session ID（如果有）。
 	// 注意：对于 Gemini CLI，真正的 session ID 只能从 init 事件获取，
@@ -115,12 +117,17 @@ func (b *CLIBackend) SendPrompt(text string) error {
 	if b.workDir != "" {
 		b.cmd.Dir = b.workDir
 	}
-	b.cmd.Stderr = os.Stderr
 
 	// 设置 stdout 管道
 	stdoutPipe, err := b.cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
+	}
+
+	// 设置 stderr 管道（捕获错误信息推送给前端）
+	stderrPipe, err := b.cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
 	}
 
 	// 设置 stdin 管道（Claude 需要通过 stdin 写入 prompt）
@@ -142,6 +149,9 @@ func (b *CLIBackend) SendPrompt(text string) error {
 	// 启动 stdout 读取循环
 	go b.readLoop(stdoutPipe)
 
+	// 启动 stderr 读取循环（捕获错误信息推送给前端）
+	go b.stderrLoop(stderrPipe)
+
 	// 监控进程退出
 	go b.waitProcess()
 
@@ -156,16 +166,17 @@ func (b *CLIBackend) buildArgs(prompt string) []string {
 	switch b.def.ID {
 	case "gemini-cli", "gemini":
 		// Gemini CLI: -p "prompt" --yolo -o stream-json
-		// -p 后面必须紧跟 prompt 文本（参照 Multica 的 buildGeminiArgs）
 		for _, arg := range b.def.Args {
 			args = append(args, arg)
 			if arg == "-p" || arg == "--prompt" {
 				args = append(args, prompt)
 			}
 		}
+		// 运行时指定的模型覆盖默认模型
+		if b.model != "" {
+			args = append(args, "--model", b.model)
+		}
 		// 只有拿到真正的 session ID（从 init 事件获取）后才使用 --resume。
-		// Gemini CLI 的 --resume 只接受：数字序号、UUID 或 "latest"，
-		// 不能使用自定义生成的 ID。
 		if b.turnCount > 1 && b.sessionID != "" {
 			args = append(args, "--resume", b.sessionID)
 		}
@@ -318,6 +329,73 @@ func (b *CLIBackend) readLoop(stdout io.ReadCloser) {
 			b.cb.OnTurnComplete("end_turn", "", nil)
 		}
 	}
+}
+
+// stderrLoop 从子进程的 stderr 读取错误输出并推送给前端。
+// Gemini CLI 的 429 等 API 错误会输出到 stderr，需要捕获并展示。
+func (b *CLIBackend) stderrLoop(stderr io.ReadCloser) {
+	scanner := bufio.NewScanner(stderr)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	// 累积 stderr 行，用于提取关键错误信息
+	var stderrBuf strings.Builder
+	for scanner.Scan() {
+		select {
+		case <-b.done:
+			return
+		default:
+		}
+
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		// 记录到服务器日志
+		log.Printf("[CLIBackend:stderr] %s", line)
+
+		// 记录为协议日志（让前端 ACP Log Panel 也能看到）
+		if b.cb != nil && b.cb.OnProtocolLog != nil {
+			b.cb.OnProtocolLog("stderr", line)
+		}
+
+		stderrBuf.WriteString(line)
+		stderrBuf.WriteString("\n")
+
+		// 检测关键错误模式并立即推送给前端
+		if b.cb != nil && b.cb.OnMessageChunk != nil {
+			errMsg := extractStderrError(line)
+			if errMsg != "" {
+				b.cb.OnMessageChunk("\n> **Error:** " + errMsg + "\n")
+			}
+		}
+	}
+}
+
+// extractStderrError 从 stderr 行中提取关键错误信息。
+// 返回空字符串表示该行不包含需要展示的错误。
+func extractStderrError(line string) string {
+	// Gemini CLI 429 rate limit 错误
+	if strings.Contains(line, "No capacity available for model") {
+		return line
+	}
+	// 通用的 "Attempt N failed" 摘要行
+	if strings.HasPrefix(line, "Attempt ") && strings.Contains(line, "failed with status") {
+		return line
+	}
+	// 认证错误
+	if strings.Contains(line, "authentication") || strings.Contains(line, "unauthorized") || strings.Contains(line, "UNAUTHENTICATED") {
+		return line
+	}
+	// 网络错误
+	if strings.Contains(line, "ECONNREFUSED") || strings.Contains(line, "ETIMEDOUT") || strings.Contains(line, "network error") {
+		return line
+	}
+	// 模型不存在
+	if strings.Contains(line, "model not found") || strings.Contains(line, "MODEL_NOT_FOUND") {
+		return line
+	}
+	return ""
 }
 
 // waitProcess 等待当前进程退出并更新 session ID

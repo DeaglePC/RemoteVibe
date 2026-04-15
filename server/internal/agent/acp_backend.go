@@ -48,8 +48,9 @@ func (b *ACPBackend) SessionID() string {
 	return ""
 }
 
-// Start 启动 ACP 后端：启动子进程 → ACP 握手 → 创建或恢复会话
-func (b *ACPBackend) Start(workDir string, sessionID string) error {
+// Start 启动 ACP 后端：启动子进程 → ACP 握手 → 创建或恢复会话。
+// model 参数在 ACP 模式下暂不使用（通过 ~/.gemini/settings.json 配置）。
+func (b *ACPBackend) Start(workDir string, sessionID string, model string) error {
 	b.mu.Lock()
 
 	log.Printf("[ACPBackend] Building command: %s %v (workDir=%s, resumeSession=%s)",

@@ -15,6 +15,7 @@ type StartAgentPayload struct {
 	AgentID          string `json:"agentId"`
 	WorkDir          string `json:"workDir,omitempty"`
 	GeminiSessionID  string `json:"geminiSessionId,omitempty"` // 非空时恢复 Gemini CLI 原生会话
+	Model            string `json:"model,omitempty"`           // 指定模型（如 gemini-2.5-pro），空字符串使用默认
 }
 
 // SendPromptPayload sends a user message to the agent

@@ -4,8 +4,9 @@ package agent
 // 无论底层是 ACP (JSON-RPC 2.0) 还是 CLI (pipe/stream-json)，
 // 都通过此接口向上层提供一致的事件流和控制方法。
 type Backend interface {
-	// Start 启动后端连接（ACP 握手或 CLI 子进程启动）
-	Start(workDir string, sessionID string) error
+	// Start 启动后端连接（ACP 握手或 CLI 子进程启动）。
+	// model 为空时使用 agent 默认模型。
+	Start(workDir string, sessionID string, model string) error
 
 	// SendPrompt 向 Agent 发送用户提示。
 	// Agent 的响应通过 Callbacks 异步推送。

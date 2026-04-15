@@ -127,6 +127,7 @@ export default function FileViewer({ filePath, fileName, onClose, isMobile }: Pr
   const lines = content?.split('\n') || [];
   const lineCount = lines.length;
   const lineNumWidth = Math.max(String(lineCount).length * 0.6 + 1, 2.5);
+  const fileDirectory = filePath.replace(/\/[^/]+$/, '') || '/';
 
   return (
     <div className={`flex flex-col h-full ${isMobile ? '' : ''}`}
@@ -134,65 +135,96 @@ export default function FileViewer({ filePath, fileName, onClose, isMobile }: Pr
     >
       {/* Header */}
       <div
-        className="flex items-center gap-2 px-3 py-2.5 flex-shrink-0"
+        className="flex flex-col flex-shrink-0"
         style={{
           background: 'var(--color-surface-1)',
           borderBottom: '1px solid var(--color-border)',
         }}
       >
-        {isMobile && (
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)] transition-all cursor-pointer"
-          >
-            <ArrowLeft size={16} />
-          </button>
-        )}
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          {getFileIcon(fileName)}
-          <span className="text-sm font-medium truncate text-[var(--color-text-primary)]">
-            {fileName}
-          </span>
-          <span
-            className="text-xs px-1.5 py-0.5 rounded"
-            style={{
-              background: 'var(--color-surface-3)',
-              color: 'var(--color-text-muted)',
-              fontSize: '0.6rem',
-            }}
-          >
-            {language}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {content !== null && (
-            <>
-              <span className="text-xs text-[var(--color-text-muted)] hidden sm:block">
-                {lineCount} lines
-              </span>
-              <button
-                onClick={handleCopy}
-                className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-accent-400)] hover:bg-[var(--color-surface-3)] transition-all cursor-pointer"
-                title="Copy file content"
-              >
-                {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-              </button>
-            </>
-          )}
-          {!isMobile && (
+        <div className="flex items-center gap-2 px-3 py-3 sm:py-2.5">
+          {isMobile && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-400/10 transition-all cursor-pointer"
-              title="Close file viewer"
+              className="flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)] transition-all cursor-pointer"
             >
-              <X size={14} />
+              <ArrowLeft size={16} />
+              <span className="text-xs font-medium">Files</span>
             </button>
           )}
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {getFileIcon(fileName)}
+            <div className="min-w-0 flex-1">
+              <span className="block text-sm font-medium truncate text-[var(--color-text-primary)]">
+                {fileName}
+              </span>
+              {isMobile && (
+                <span
+                  className="mt-0.5 block text-[11px] truncate"
+                  style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}
+                >
+                  {fileDirectory}
+                </span>
+              )}
+            </div>
+            <span
+              className="text-xs px-1.5 py-0.5 rounded"
+              style={{
+                background: 'var(--color-surface-3)',
+                color: 'var(--color-text-muted)',
+                fontSize: '0.6rem',
+              }}
+            >
+              {language}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {content !== null && (
+              <>
+                <span className="text-xs text-[var(--color-text-muted)] hidden sm:block">
+                  {lineCount} lines
+                </span>
+                <button
+                  onClick={handleCopy}
+                  className="p-2 rounded-xl text-[var(--color-text-muted)] hover:text-[var(--color-accent-400)] hover:bg-[var(--color-surface-3)] transition-all cursor-pointer"
+                  title="Copy file content"
+                >
+                  {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                </button>
+              </>
+            )}
+            {!isMobile && (
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-400/10 transition-all cursor-pointer"
+                title="Close file viewer"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
         </div>
+
+        {isMobile && content !== null && (
+          <div className="px-3 pb-3 sm:hidden">
+            <div
+              className="rounded-xl px-3 py-2.5"
+              style={{
+                background: 'var(--color-surface-2)',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              <div className="flex items-center justify-between gap-3 text-[11px]"
+                style={{ color: 'var(--color-text-muted)' }}>
+                <span>{lineCount} lines</span>
+                <span>Swipe sideways for long lines</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto">
+      <div className={`flex-1 overflow-auto ${isMobile ? 'mobile-scroll safe-bottom' : ''}`}>
         {loading && (
           <div className="flex items-center justify-center py-16">
             <div className="flex gap-1.5">

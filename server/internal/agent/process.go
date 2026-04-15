@@ -54,17 +54,7 @@ func NewProcess(def config.AgentDef) *Process {
 }
 
 // Start launches the agent subprocess
-func (p *Process) Start(workDir string) error {
-	return p.startInternal(workDir, "")
-}
-
-// StartWithResume 启动 Agent 并恢复已有会话
-func (p *Process) StartWithResume(workDir string, sessionID string) error {
-	return p.startInternal(workDir, sessionID)
-}
-
-// startInternal 是公共启动逻辑
-func (p *Process) startInternal(workDir string, sessionID string) error {
+func (p *Process) Start(opts StartOptions) error {
 	p.mu.Lock()
 
 	if p.state == StateRunning {
@@ -75,10 +65,10 @@ func (p *Process) startInternal(workDir string, sessionID string) error {
 	p.setState(StateStarting)
 	p.mu.Unlock()
 
-	log.Printf("[Process] Starting %s (mode=%s, workDir=%s, session=%s)",
-		p.def.Name, p.backend.Mode(), workDir, sessionID)
+	log.Printf("[Process] Starting %s (mode=%s, workDir=%s, session=%s, model=%s)",
+		p.def.Name, p.backend.Mode(), opts.WorkDir, opts.GeminiSessionID, opts.Model)
 
-	if err := p.backend.Start(workDir, sessionID); err != nil {
+	if err := p.backend.Start(opts.WorkDir, opts.GeminiSessionID, opts.Model); err != nil {
 		p.mu.Lock()
 		p.setError(fmt.Errorf("start %s backend: %w", p.backend.Mode(), err))
 		retErr := p.err

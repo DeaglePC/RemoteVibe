@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { FolderOpen, LoaderCircle, Menu, Play, Square, X } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { useBackendStore, getApiBaseUrl, getAuthHeaders } from '../../stores/backendStore';
 import FolderPickerModal from '../FolderPickerModal';
@@ -7,8 +8,7 @@ import WorkspacePickerModal from '../WorkspacePickerModal';
 import SessionPickerModal from '../SessionPickerModal';
 
 interface Props {
-  onStartAgent: (agentId: string, workDir: string) => void;
-  onStartAgentWithResume: (agentId: string, workDir: string, geminiSessionId: string) => void;
+  onStartAgent: (agentId: string, workDir: string, opts?: { geminiSessionId?: string; model?: string }) => void;
   onStopAgent: (agentId: string) => void;
   /** 当此值变化时，自动触发 Launch 流程 */
   launchTrigger?: number;
@@ -16,7 +16,7 @@ interface Props {
   hideHeader?: boolean;
 }
 
-export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAgent, launchTrigger, hideHeader }: Props) {
+export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideHeader }: Props) {
   const agents = useChatStore((s) => s.agents);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
   const agentStatus = useChatStore((s) => s.agentStatus);
@@ -39,6 +39,7 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [pendingWorkDir, setPendingWorkDir] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState('');
 
   const activeAgent = agents.find((a) => a.id === activeAgentId) || agents[0];
   const isRunning = agentStatus === 'running';
@@ -86,9 +87,8 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
     setPendingWorkDir(null);
     if (activeAgent) {
       useChatStore.getState().createSession(activeAgent.id, path);
-      // 立即设为 starting，避免在后端回复前显示 Offline
       useChatStore.getState().setAgentStatus('starting');
-      onStartAgent(activeAgent.id, path);
+      onStartAgent(activeAgent.id, path, selectedModel ? { model: selectedModel } : undefined);
       recordWorkspace(path);
     }
   };
@@ -109,20 +109,50 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
   };
 
   /** 恢复 Gemini CLI 原生会话（真正恢复 agent 上下文） */
-  const handleResumeGeminiSession = (geminiSessionId: string) => {
+  const handleResumeGeminiSession = async (geminiSessionId: string) => {
     setShowSessionPicker(false);
     const workDir = pendingWorkDir;
     if (workDir && activeAgent) {
-      useChatStore.getState().createSession(activeAgent.id, workDir);
-      // 立即将全局 agentStatus 设为 starting，避免在等待后端回复前显示 Offline
-      useChatStore.getState().setAgentStatus('starting');
-      useChatStore.getState().addMessage({
+      const store = useChatStore.getState();
+      store.createSession(activeAgent.id, workDir);
+      store.setAgentStatus('starting');
+      store.addMessage({
         id: `msg_${Date.now()}_resume`,
         role: 'system',
         content: `🔄 Resuming Gemini CLI session ${geminiSessionId.slice(0, 8)}...`,
         timestamp: Date.now(),
       });
-      onStartAgentWithResume(activeAgent.id, workDir, geminiSessionId);
+
+      // 从后端加载 Gemini CLI 原生会话的历史消息
+      try {
+        const url = `${getApiBaseUrl()}/api/gemini-session-messages?workDir=${encodeURIComponent(workDir)}&sessionId=${encodeURIComponent(geminiSessionId)}`;
+        const resp = await fetch(url, { headers: getAuthHeaders() });
+        if (resp.ok) {
+          const data = await resp.json();
+          const msgs = data.messages || [];
+          if (msgs.length > 0) {
+            const now = Date.now();
+            for (let i = 0; i < msgs.length; i++) {
+              store.addMessage({
+                id: `msg_${now}_history_${i}`,
+                role: msgs[i].role === 'user' ? 'user' : 'agent',
+                content: msgs[i].content,
+                timestamp: now - (msgs.length - i) * 1000, // 保持顺序
+              });
+            }
+            store.addMessage({
+              id: `msg_${now}_divider`,
+              role: 'system',
+              content: `── Previous conversation (${msgs.length} messages) ──`,
+              timestamp: now,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[TopBar] Failed to load Gemini session messages:', err);
+      }
+
+      onStartAgent(activeAgent.id, workDir, { geminiSessionId, model: selectedModel || undefined });
       recordWorkspace(workDir);
     }
     setPendingWorkDir(null);
@@ -185,6 +215,7 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
       : 'var(--color-text-muted)';
 
   const statusText = isRunning ? 'Connected' : isStarting ? 'Starting' : 'Offline';
+  const activeWorkspaceName = activeWorkDir?.split('/').filter(Boolean).pop() || activeWorkDir || '';
 
   // ==================== Session List Dropdown Content ====================
   const sessionDropdownContent = (
@@ -573,56 +604,68 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
     {!hideHeader && (
     <header className="sm:hidden glass-strong z-10 safe-top"
       style={{ borderBottom: '1px solid var(--color-border)' }}>
-      <div className="flex items-center justify-between px-3 py-2">
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
         {/* Left: Logo + Status */}
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0"
             style={{
               background: 'linear-gradient(135deg, var(--color-brand-500), var(--color-accent-500))',
             }}>
             🐾
           </div>
-          <div className="flex items-center gap-1.5">
-            <div
-              className={`w-2 h-2 rounded-full flex-shrink-0 ${isRunning ? 'animate-pulse-glow' : ''}`}
-              style={{ background: statusDotColor }}
-            />
-            <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-              {statusText}
-            </span>
-            {/* WS status dot */}
-            <div className="w-1.5 h-1.5 rounded-full"
-              style={{
-                background: wsStatus === 'connected'
-                  ? 'var(--color-success)'
-                  : wsStatus === 'connecting'
-                    ? 'var(--color-warning)'
-                    : 'var(--color-danger)',
-              }}
-            />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div
+                className={`w-2 h-2 rounded-full flex-shrink-0 ${isRunning ? 'animate-pulse-glow' : ''}`}
+                style={{ background: statusDotColor }}
+              />
+              <span className="text-xs font-medium truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                {statusText}
+              </span>
+              {/* WS status dot */}
+              <div className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{
+                  background: wsStatus === 'connected'
+                    ? 'var(--color-success)'
+                    : wsStatus === 'connecting'
+                      ? 'var(--color-warning)'
+                      : 'var(--color-danger)',
+                }}
+              />
+            </div>
+            {isRunning && activeWorkspaceName && (
+              <div
+                className="text-[11px] truncate mt-0.5 max-w-[120px]"
+                style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}
+              >
+                {activeWorkspaceName}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Center: Quick actions */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {!isRunning && !isStarting && activeAgent && (
             <button
               onClick={handleLaunchClick}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl active:scale-95 cursor-pointer"
               style={{
                 background: 'linear-gradient(135deg, var(--color-brand-500), var(--color-accent-500))',
                 color: 'white',
                 border: 'none',
               }}
             >
-              Launch
+              <Play size={14} />
+              <span>Launch</span>
             </button>
           )}
 
           {isStarting && (
-            <div className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg"
+            <div className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-xl"
               style={{ background: 'var(--color-surface-2)', color: 'var(--color-warning)' }}>
-              <span className="animate-spin">⟳</span>
+              <LoaderCircle size={14} className="animate-spin" />
+              <span className="font-medium">Starting</span>
             </div>
           )}
 
@@ -630,28 +673,29 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
             <>
               <button
                 onClick={handleToggleFileBrowser}
-                className="p-1.5 rounded-lg active:scale-95 cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl active:scale-95 cursor-pointer"
                 style={{
                   background: showFileBrowser ? 'var(--color-surface-3)' : 'var(--color-surface-2)',
                   color: showFileBrowser ? 'var(--color-accent-400)' : 'var(--color-text-secondary)',
                   border: '1px solid var(--color-border)',
                 }}
+                title="Open file browser"
               >
-                <span className="text-sm">📂</span>
+                <FolderOpen size={15} />
+                <span className="text-xs font-medium">Files</span>
               </button>
 
               <button
                 onClick={() => activeAgent && onStopAgent(activeAgent.id)}
-                className="p-1.5 rounded-lg active:scale-95 cursor-pointer"
+                className="w-10 h-10 rounded-full flex items-center justify-center active:scale-95 cursor-pointer"
                 style={{
                   background: 'var(--color-surface-2)',
                   color: 'var(--color-danger)',
                   border: '1px solid var(--color-danger)',
                 }}
+                title="Stop agent"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
+                <Square size={14} fill="currentColor" />
               </button>
             </>
           )}
@@ -660,24 +704,15 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
         {/* Right: Menu button */}
         <button
           onClick={() => setShowMobileMenu(!showMobileMenu)}
-          className="p-1.5 rounded-lg active:scale-95 cursor-pointer"
+          className="w-10 h-10 rounded-xl flex items-center justify-center active:scale-95 cursor-pointer flex-shrink-0"
           style={{
             background: showMobileMenu ? 'var(--color-surface-3)' : 'transparent',
             color: 'var(--color-text-secondary)',
             border: 'none',
           }}
+          title={showMobileMenu ? 'Close menu' : 'Open menu'}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            {showMobileMenu ? (
-              <path d="M18 6L6 18M6 6l12 12" />
-            ) : (
-              <>
-                <path d="M4 6h16" />
-                <path d="M4 12h16" />
-                <path d="M4 18h16" />
-              </>
-            )}
-          </svg>
+          {showMobileMenu ? <X size={18} /> : <Menu size={18} />}
         </button>
       </div>
 
@@ -838,9 +873,11 @@ export default function TopBar({ onStartAgent, onStartAgentWithResume, onStopAge
           )}
           agents={agents}
           selectedAgentId={activeAgent?.id || null}
+          selectedModel={selectedModel}
           onAgentChange={(agentId) => {
             useChatStore.getState().setActiveAgentId(agentId);
           }}
+          onModelChange={setSelectedModel}
           onRestoreSession={handleRestoreAndStart}
           onResumeGeminiSession={handleResumeGeminiSession}
           onNewSession={() => startNewSession(pendingWorkDir)}

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os/exec"
 	"time"
@@ -132,8 +133,8 @@ func (h *Handler) handleStartAgent(payload json.RawMessage) {
 		return
 	}
 
-	log.Printf("[Handler] handleStartAgent: agentId=%s, workDir=%s, geminiSessionID=%s",
-		p.AgentID, p.WorkDir, p.GeminiSessionID)
+	log.Printf("[Handler] handleStartAgent: agentId=%s, workDir=%s, geminiSessionID=%s, model=%s",
+		p.AgentID, p.WorkDir, p.GeminiSessionID, p.Model)
 
 	// Notify starting — 这条消息会立即通过 writeLoop 发出
 	h.send(&ServerMessage{
@@ -146,16 +147,11 @@ func (h *Handler) handleStartAgent(payload json.RawMessage) {
 
 	// 异步执行启动逻辑，避免阻塞 readLoop
 	go func() {
-		var proc *agent.Process
-		var err error
-
-		if p.GeminiSessionID != "" {
-			log.Printf("[Handler] Starting agent with resume: sessionID=%s", p.GeminiSessionID)
-			proc, err = h.server.mgr.StartAgentWithResume(p.AgentID, p.WorkDir, p.GeminiSessionID)
-		} else {
-			log.Printf("[Handler] Starting agent (new session)")
-			proc, err = h.server.mgr.StartAgent(p.AgentID, p.WorkDir)
-		}
+		proc, err := h.server.mgr.StartAgent(p.AgentID, agent.StartOptions{
+			WorkDir:         p.WorkDir,
+			GeminiSessionID: p.GeminiSessionID,
+			Model:           p.Model,
+		})
 
 		if err != nil {
 			log.Printf("[Handler] Agent start failed: %v", err)
@@ -412,6 +408,9 @@ func (h *Handler) wireBackendCallbacks(proc *agent.Process) {
 		},
 
 		OnProtocolLog: func(direction string, message string) {
+			// 写入本地日志文件
+			h.server.protocolLog.Log(direction, message)
+			// 推送给前端 ACP Log Panel
 			h.send(&ServerMessage{
 				Type: MsgTypeACPLog,
 				Payload: ACPLogPayload{
@@ -423,6 +422,7 @@ func (h *Handler) wireBackendCallbacks(proc *agent.Process) {
 		},
 
 		OnUnknownEvent: func(eventType string, rawJSON string) {
+			h.server.protocolLog.Log("rx", fmt.Sprintf("[unknown:%s] %s", eventType, rawJSON))
 			h.send(&ServerMessage{
 				Type: MsgTypeACPLog,
 				Payload: ACPLogPayload{

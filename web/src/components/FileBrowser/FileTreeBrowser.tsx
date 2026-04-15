@@ -3,9 +3,9 @@ import type { FileEntry, FilesResult } from '../../types/protocol';
 import { getApiBaseUrl, getAuthHeaders } from '../../stores/backendStore';
 import { useChatStore } from '../../stores/chatStore';
 import {
-  Folder, File as FileIcon, FileCode, FileImage, FileText, Database,
-  Terminal, Lock, EyeOff, LayoutTemplate,
-  ChevronRight, ChevronDown, X, RefreshCw, Eye, EyeOff as EyeOffToggle,
+  ArrowLeft, ChevronDown, ChevronRight, Database, Eye, EyeOff as EyeOffToggle,
+  EyeOff, File as FileIcon, FileCode, FileImage, FileText, Folder,
+  LayoutTemplate, Lock, RefreshCw, Terminal, X,
 } from 'lucide-react';
 import { isTextFile } from './FileViewer';
 
@@ -250,81 +250,119 @@ export default function FileTreeBrowser({ rootPath, onClose, onFileOpen, onSendW
     <div className="flex flex-col h-full bg-[var(--color-surface-0)] select-none">
       {/* Header */}
       <div
-        className="flex items-center gap-2 px-3 py-2 flex-shrink-0"
+        className="flex flex-col flex-shrink-0"
         style={{
           background: 'var(--color-surface-1)',
           borderBottom: '1px solid var(--color-border)',
         }}
       >
-        <span
-          className="text-[10px] font-semibold uppercase tracking-widest flex-1 truncate"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
-          Explorer
-        </span>
-        <button
-          onClick={() => setShowHidden(!showHidden)}
-          className="p-1 rounded-md transition-all cursor-pointer"
-          style={{
-            color: showHidden ? 'var(--color-accent-400)' : 'var(--color-text-muted)',
-            background: 'transparent',
-            border: 'none',
-          }}
-          title={showHidden ? 'Hide hidden files' : 'Show hidden files'}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-2)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        >
-          {showHidden ? <Eye size={14} /> : <EyeOffToggle size={14} />}
-        </button>
-        <button
-          onClick={loadRoot}
-          className="p-1 rounded-md transition-all cursor-pointer"
-          style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
-          title="Refresh"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--color-surface-2)';
-            e.currentTarget.style.color = 'var(--color-text-primary)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = 'var(--color-text-muted)';
-          }}
-        >
-          <RefreshCw size={14} />
-        </button>
-        <button
-          onClick={onClose}
-          className="p-1 rounded-md transition-all cursor-pointer"
-          style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
-          title="Close"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--color-surface-2)';
-            e.currentTarget.style.color = 'var(--color-text-primary)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = 'var(--color-text-muted)';
-          }}
-        >
-          <X size={14} />
-        </button>
-      </div>
+        <div className="flex items-center gap-2 px-3 py-3 sm:py-2.5">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1.5 rounded-xl px-2.5 py-2 transition-all cursor-pointer"
+            style={{ color: 'var(--color-text-secondary)', background: 'var(--color-surface-2)', border: 'none' }}
+            title="Back to chat"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--color-surface-3)';
+              e.currentTarget.style.color = 'var(--color-text-primary)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--color-surface-2)';
+              e.currentTarget.style.color = 'var(--color-text-secondary)';
+            }}
+          >
+            <ArrowLeft size={16} className="sm:hidden" />
+            <X size={14} className="hidden sm:block" />
+            <span className="text-xs font-medium sm:hidden">Chat</span>
+          </button>
 
-      {/* 根目录标题 */}
-      <div
-        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide flex-shrink-0 cursor-default"
-        style={{
-          color: 'var(--color-text-secondary)',
-          background: 'var(--color-surface-1)',
-          borderBottom: '1px solid var(--color-border)',
-        }}
-      >
-        <Folder size={14} className="text-blue-400" fill="currentColor" fillOpacity={0.2} />
-        <span className="truncate">{rootName}</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.24em]"
+              style={{ color: 'var(--color-text-muted)' }}>
+              Workspace files
+            </div>
+            <div className="mt-1 flex items-center gap-2 min-w-0">
+              <Folder size={16} className="text-blue-400 flex-shrink-0" fill="currentColor" fillOpacity={0.2} />
+              <span className="text-sm font-semibold truncate text-[var(--color-text-primary)]">
+                {rootName}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => setShowHidden(!showHidden)}
+              className="flex items-center gap-1.5 rounded-xl px-2.5 py-2 transition-all cursor-pointer"
+              style={{
+                color: showHidden ? 'var(--color-accent-400)' : 'var(--color-text-muted)',
+                background: showHidden ? 'var(--color-surface-3)' : 'var(--color-surface-2)',
+                border: 'none',
+              }}
+              title={showHidden ? 'Hide hidden files' : 'Show hidden files'}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-3)'; }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = showHidden ? 'var(--color-surface-3)' : 'var(--color-surface-2)';
+              }}
+            >
+              {showHidden ? <Eye size={14} /> : <EyeOffToggle size={14} />}
+              <span className="text-xs font-medium sm:hidden">Dotfiles</span>
+            </button>
+            <button
+              onClick={loadRoot}
+              className="flex items-center gap-1.5 rounded-xl px-2.5 py-2 transition-all cursor-pointer"
+              style={{ color: 'var(--color-text-muted)', background: 'var(--color-surface-2)', border: 'none' }}
+              title="Refresh"
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--color-surface-3)';
+                e.currentTarget.style.color = 'var(--color-text-primary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--color-surface-2)';
+                e.currentTarget.style.color = 'var(--color-text-muted)';
+              }}
+            >
+              <RefreshCw size={14} />
+              <span className="text-xs font-medium sm:hidden">Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide cursor-default"
+          style={{
+            color: 'var(--color-text-secondary)',
+            borderTop: '1px solid var(--color-border)',
+          }}
+        >
+          <Folder size={14} className="text-blue-400" fill="currentColor" fillOpacity={0.2} />
+          <span className="truncate">{rootName}</span>
+        </div>
+
+        <div className="px-3 pb-3 sm:hidden">
+          <div
+            className="rounded-xl px-3 py-2.5"
+            style={{
+              background: 'var(--color-surface-2)',
+              border: '1px solid var(--color-border)',
+            }}
+          >
+            <div className="text-[11px] uppercase tracking-[0.2em]"
+              style={{ color: 'var(--color-text-muted)' }}>
+              Current path
+            </div>
+            <div className="mt-1 text-xs font-mono whitespace-nowrap overflow-x-auto mobile-scroll"
+              style={{ color: 'var(--color-text-secondary)' }}>
+              {rootPath}
+            </div>
+            <div className="mt-2 text-[11px]"
+              style={{ color: 'var(--color-text-muted)' }}>
+              Tap folders to expand. Tap text files to preview.
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 树视图 */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden py-2 mobile-scroll safe-bottom">
         {loading && (
           <div className="flex flex-col gap-0.5 px-2 py-1">
             {[...Array(8)].map((_, i) => (
@@ -389,7 +427,7 @@ function TreeNodeItem({
     <>
       <button
         onClick={() => onNodeClick(node)}
-        className="w-full flex items-center gap-1 py-[3px] pr-2 text-left transition-colors duration-100 cursor-pointer group"
+        className="mx-2 my-0.5 w-[calc(100%-1rem)] flex items-center gap-2 rounded-xl py-2.5 pr-3 text-left transition-colors duration-100 cursor-pointer group sm:mx-0 sm:my-0 sm:w-full sm:rounded-none sm:py-1"
         style={{
           paddingLeft: `${indent}px`,
           background: 'transparent',
@@ -421,18 +459,26 @@ function TreeNodeItem({
         </span>
 
         {/* 文件名 */}
-        <span
-          className="text-[13px] truncate ml-0.5 font-mono"
-          style={{
-            color: node.isDir
-              ? 'var(--color-text-primary)'
-              : canOpen
-                ? 'var(--color-text-secondary)'
-                : 'var(--color-text-muted)',
-          }}
-        >
-          {node.name}
-        </span>
+        <div className="min-w-0 flex-1">
+          <span
+            className="block text-[13px] truncate ml-0.5 font-mono"
+            style={{
+              color: node.isDir
+                ? 'var(--color-text-primary)'
+                : canOpen
+                  ? 'var(--color-text-secondary)'
+                  : 'var(--color-text-muted)',
+            }}
+          >
+            {node.name}
+          </span>
+          <span
+            className="mt-0.5 block text-[10px] uppercase tracking-[0.18em] sm:hidden"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            {node.isDir ? 'Folder' : canOpen ? 'Preview' : 'Binary'}
+          </span>
+        </div>
       </button>
 
       {/* 递归渲染子节点 */}

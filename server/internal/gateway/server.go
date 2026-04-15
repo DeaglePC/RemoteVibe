@@ -61,12 +61,13 @@ var upgrader = websocket.Upgrader{
 
 // Server is the HTTP + WebSocket server
 type Server struct {
-	cfg    *config.Config
-	mgr    *agent.Manager
+	cfg     *config.Config
+	mgr     *agent.Manager
 	httpSrv *http.Server
 
-	clients   map[*websocket.Conn]*ClientConn
-	clientsMu sync.RWMutex
+	clients     map[*websocket.Conn]*ClientConn
+	clientsMu   sync.RWMutex
+	protocolLog *ProtocolLogger // 协议日志记录器（TX/RX/stderr → 本地文件）
 }
 
 // ClientConn tracks a connected WebSocket client
@@ -79,9 +80,10 @@ type ClientConn struct {
 // NewServer creates a new gateway server
 func NewServer(cfg *config.Config, mgr *agent.Manager) *Server {
 	s := &Server{
-		cfg:     cfg,
-		mgr:     mgr,
-		clients: make(map[*websocket.Conn]*ClientConn),
+		cfg:         cfg,
+		mgr:         mgr,
+		clients:     make(map[*websocket.Conn]*ClientConn),
+		protocolLog: NewProtocolLogger(),
 	}
 
 	mux := http.NewServeMux()
@@ -96,6 +98,7 @@ func NewServer(cfg *config.Config, mgr *agent.Manager) *Server {
 	mux.HandleFunc("/api/workspaces", s.handleWorkspaces)
 	mux.HandleFunc("/api/auth-status", s.handleAuthStatus)
 	mux.HandleFunc("/api/gemini-sessions", s.handleGeminiSessions)
+	mux.HandleFunc("/api/gemini-session-messages", s.handleGeminiSessionMessages)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 
 	s.httpSrv = &http.Server{
@@ -116,6 +119,11 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// 关闭协议日志
+	if s.protocolLog != nil {
+		s.protocolLog.Close()
+	}
 
 	s.clientsMu.Lock()
 	for _, c := range s.clients {
@@ -852,15 +860,34 @@ func (s *Server) broadcast(msg *ServerMessage) {
 
 // ==================== Gemini CLI Native Sessions ====================
 
-// geminiSessionFile 表示 Gemini CLI 会话 JSON 文件的结构（仅解析需要的字段）
+// geminiSessionToolResultDisplay 表示 Gemini 原生会话里工具调用的展示信息。
+type geminiSessionToolResultDisplay struct {
+	FileName  string `json:"fileName,omitempty"`
+	FilePath  string `json:"filePath,omitempty"`
+	IsNewFile bool   `json:"isNewFile,omitempty"`
+}
+
+// geminiSessionToolCall 表示 Gemini 原生会话里的一次工具调用。
+type geminiSessionToolCall struct {
+	Name          string                          `json:"name"`
+	Description   string                          `json:"description,omitempty"`
+	DisplayName   string                          `json:"displayName,omitempty"`
+	ResultDisplay *geminiSessionToolResultDisplay `json:"resultDisplay,omitempty"`
+}
+
+// geminiSessionMessageFile 表示 Gemini CLI 会话文件中的一条消息。
+type geminiSessionMessageFile struct {
+	Type      string                  `json:"type"`
+	Content   interface{}             `json:"content"`
+	ToolCalls []geminiSessionToolCall `json:"toolCalls,omitempty"`
+}
+
+// geminiSessionFile 表示 Gemini CLI 会话 JSON 文件的结构（仅解析需要的字段）。
 type geminiSessionFile struct {
-	SessionID   string `json:"sessionId"`
-	StartTime   string `json:"startTime"`
-	LastUpdated string `json:"lastUpdated"`
-	Messages    []struct {
-		Type    string `json:"type"`
-		Content interface{} `json:"content"`
-	} `json:"messages"`
+	SessionID   string                     `json:"sessionId"`
+	StartTime   string                     `json:"startTime"`
+	LastUpdated string                     `json:"lastUpdated"`
+	Messages    []geminiSessionMessageFile `json:"messages"`
 }
 
 // geminiProjectsFile 表示 ~/.gemini/projects.json 的结构
@@ -972,11 +999,8 @@ func parseISO8601ToMillis(s string) int64 {
 	return t.UnixMilli()
 }
 
-// extractSessionTitle 从会话消息中提取标题（取第一条用户消息的前 80 个字符）
-func extractSessionTitle(messages []struct {
-	Type    string      `json:"type"`
-	Content interface{} `json:"content"`
-}) string {
+// extractSessionTitle 从会话消息中提取标题（取第一条用户消息的前 80 个字符）。
+func extractSessionTitle(messages []geminiSessionMessageFile) string {
 	for _, msg := range messages {
 		if msg.Type != "user" {
 			continue
@@ -1034,4 +1058,201 @@ func (s *Server) handleGeminiSessions(w http.ResponseWriter, r *http.Request) {
 		"sessions": sessions,
 	})
 	w.Write(data)
+}
+
+// handleGeminiSessionMessages 返回指定 Gemini CLI 原生会话的消息历史
+// GET /api/gemini-session-messages?workDir=/path/to/project&sessionId=xxx
+// 返回 {messages: [{role: "user"|"assistant", content: "..."}]}
+func (s *Server) handleGeminiSessionMessages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	workDir := r.URL.Query().Get("workDir")
+	sessionID := r.URL.Query().Get("sessionId")
+	if workDir == "" || sessionID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"workDir and sessionId are required"}`))
+		return
+	}
+
+	messages := s.loadGeminiSessionMessages(workDir, sessionID)
+
+	data, _ := json.Marshal(map[string]interface{}{
+		"sessionId": sessionID,
+		"messages":  messages,
+	})
+	w.Write(data)
+}
+
+// geminiSessionMessage 是返回给前端的简化消息结构
+type geminiSessionMessage struct {
+	Role    string `json:"role"`    // "user" 或 "assistant"
+	Content string `json:"content"` // 消息文本
+}
+
+// loadGeminiSessionMessages 读取指定 Gemini CLI 会话的消息并转换为前端可展示的格式
+func (s *Server) loadGeminiSessionMessages(workDir string, sessionID string) []geminiSessionMessage {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return []geminiSessionMessage{}
+	}
+
+	geminiDir := filepath.Join(home, ".gemini")
+
+	// 读取 projects.json
+	projectsPath := filepath.Join(geminiDir, "projects.json")
+	projectsData, err := os.ReadFile(projectsPath)
+	if err != nil {
+		return []geminiSessionMessage{}
+	}
+
+	var projects geminiProjectsFile
+	if err := json.Unmarshal(projectsData, &projects); err != nil {
+		return []geminiSessionMessage{}
+	}
+
+	projectName, ok := projects.Projects[workDir]
+	if !ok {
+		return []geminiSessionMessage{}
+	}
+
+	// 查找匹配的 session 文件
+	chatsDir := filepath.Join(geminiDir, "tmp", projectName, "chats")
+	entries, err := os.ReadDir(chatsDir)
+	if err != nil {
+		return []geminiSessionMessage{}
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "session-") || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(chatsDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+
+		var sf geminiSessionFile
+		if err := json.Unmarshal(data, &sf); err != nil {
+			continue
+		}
+
+		if sf.SessionID != sessionID {
+			continue
+		}
+
+		// 找到了匹配的 session，提取消息
+		var result []geminiSessionMessage
+		for _, msg := range sf.Messages {
+			role := normalizeGeminiMessageRole(msg.Type)
+			if role == "" {
+				continue
+			}
+
+			text := extractGeminiMessageText(msg)
+			if text == "" {
+				continue
+			}
+
+			result = append(result, geminiSessionMessage{
+				Role:    role,
+				Content: text,
+			})
+		}
+
+		if result == nil {
+			result = []geminiSessionMessage{}
+		}
+		log.Printf("[Gateway] Loaded %d messages for Gemini session %s", len(result), sessionID)
+		return result
+	}
+
+	return []geminiSessionMessage{}
+}
+
+// normalizeGeminiMessageRole 将 Gemini 原生会话消息类型映射为前端角色。
+func normalizeGeminiMessageRole(messageType string) string {
+	switch messageType {
+	case "user":
+		return "user"
+	case "model", "assistant", "gemini":
+		return "assistant"
+	default:
+		return ""
+	}
+}
+
+// extractGeminiMessageText 从一条 Gemini 原生会话消息中提取可展示文本。
+func extractGeminiMessageText(message geminiSessionMessageFile) string {
+	text := extractMessageText(message.Content)
+	if text != "" {
+		return text
+	}
+	return summarizeGeminiToolCalls(message.ToolCalls)
+}
+
+// summarizeGeminiToolCalls 将工具调用列表压缩成适合聊天区展示的摘要。
+func summarizeGeminiToolCalls(toolCalls []geminiSessionToolCall) string {
+	if len(toolCalls) == 0 {
+		return ""
+	}
+
+	summaries := make([]string, 0, len(toolCalls))
+	for _, toolCall := range toolCalls {
+		title := strings.TrimSpace(toolCall.DisplayName)
+		if title == "" {
+			title = strings.TrimSpace(toolCall.Name)
+		}
+		if title == "" {
+			title = "Tool call"
+		}
+
+		detail := strings.TrimSpace(toolCall.Description)
+		if detail == "" && toolCall.ResultDisplay != nil {
+			fileName := strings.TrimSpace(toolCall.ResultDisplay.FileName)
+			if fileName == "" && toolCall.ResultDisplay.FilePath != "" {
+				fileName = filepath.Base(toolCall.ResultDisplay.FilePath)
+			}
+			if fileName != "" {
+				if toolCall.ResultDisplay.IsNewFile {
+					detail = fmt.Sprintf("Created %s", fileName)
+				} else {
+					detail = fmt.Sprintf("Updated %s", fileName)
+				}
+			}
+		}
+		if detail == "" {
+			detail = "Tool executed"
+		}
+
+		summaries = append(summaries, fmt.Sprintf("🛠 %s — %s", title, detail))
+	}
+
+	return strings.Join(summaries, "\n")
+}
+
+// extractMessageText 从 Gemini CLI 消息的 content 字段中提取文本。
+func extractMessageText(content interface{}) string {
+	// content 是数组 [{text: "..."}, ...]
+	if arr, ok := content.([]interface{}); ok {
+		var texts []string
+		for _, item := range arr {
+			if obj, ok := item.(map[string]interface{}); ok {
+				if text, ok := obj["text"].(string); ok && text != "" {
+					texts = append(texts, strings.TrimSpace(text))
+				}
+			}
+		}
+		return strings.Join(texts, "\n")
+	}
+	// content 直接是字符串
+	if text, ok := content.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return ""
 }

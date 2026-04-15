@@ -21,20 +21,35 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
-# 子进程 PID 数组
+# 子进程 PID
 SERVER_PID=""
 WEB_PID=""
 
-# 清理函数：退出时终止所有子进程组
+# 优雅终止单个进程：先 SIGTERM，等待 2 秒，如果还活着再 SIGKILL
+graceful_kill() {
+  local pid="$1"
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    return
+  fi
+  kill "$pid" 2>/dev/null || true
+  # 等待最多 2 秒
+  local i=0
+  while [ $i -lt 20 ] && kill -0 "$pid" 2>/dev/null; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  # 如果还活着，强制杀掉
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+}
+
+# 清理函数：退出时只终止本脚本启动的子进程
 cleanup() {
   echo ""
   echo -e "${YELLOW}🛑 正在关闭所有服务...${NC}"
-  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-    kill -- -"$SERVER_PID" 2>/dev/null || kill "$SERVER_PID" 2>/dev/null || true
-  fi
-  if [ -n "$WEB_PID" ] && kill -0 "$WEB_PID" 2>/dev/null; then
-    kill -- -"$WEB_PID" 2>/dev/null || kill "$WEB_PID" 2>/dev/null || true
-  fi
+  graceful_kill "$SERVER_PID"
+  graceful_kill "$WEB_PID"
   wait 2>/dev/null || true
   echo -e "${GREEN}✅ 所有服务已关闭${NC}"
   exit 0
@@ -42,18 +57,34 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM EXIT
 
-# 清理占用端口的旧进程
+# 清理占用端口的旧进程（仅针对 LISTEN 状态，避免误杀其他应用）
 kill_port() {
   local port="$1"
   local name="$2"
   local pids
-  pids=$(lsof -ti :"$port" 2>/dev/null || true)
-  if [ -n "$pids" ]; then
-    echo -e "${YELLOW}⚠️  端口 ${port} (${name}) 已被占用，正在终止旧进程 (PID: ${pids// /, })...${NC}"
-    echo "$pids" | xargs kill -9 2>/dev/null || true
-    sleep 1
-    echo -e "${GREEN}✅ 旧进程已清理${NC}"
+  # 只查找 LISTEN 状态的进程（即真正占用端口的服务端进程）
+  pids=$(lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null || true)
+  if [ -z "$pids" ]; then
+    return
   fi
+  # 显示将要终止的进程信息，帮助确认
+  echo -e "${YELLOW}⚠️  端口 ${port} (${name}) 已被占用:${NC}"
+  for pid in $pids; do
+    local cmd
+    cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+    echo -e "${YELLOW}   PID ${pid} (${cmd})${NC}"
+  done
+  # 先 SIGTERM 优雅退出
+  echo "$pids" | xargs kill 2>/dev/null || true
+  sleep 1
+  # 检查是否还有残留，强制杀掉
+  local remaining
+  remaining=$(lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null || true)
+  if [ -n "$remaining" ]; then
+    echo "$remaining" | xargs kill -9 2>/dev/null || true
+    sleep 0.5
+  fi
+  echo -e "${GREEN}✅ 旧进程已清理${NC}"
 }
 
 # 检查依赖

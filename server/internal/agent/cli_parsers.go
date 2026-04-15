@@ -173,7 +173,7 @@ func (p *ClaudeStreamParser) parseAssistantMessage(raw json.RawMessage, cb *Back
 
 	case "tool_result":
 		if cb.OnToolCallUpdate != nil {
-			*toolCallCounter++
+			// 使用当前 counter（即最近一次 tool_use 创建的 ID）来匹配
 			toolCallID := fmt.Sprintf("cli-tc-%d", *toolCallCounter)
 			status := "completed"
 			if block.IsError {
@@ -278,10 +278,13 @@ type geminiEvent struct {
 	Role  string `json:"role,omitempty"`
 	Delta bool   `json:"delta,omitempty"`
 
-	// tool-use 相关
-	ToolCallID string `json:"toolCallId,omitempty"`
+	// tool-use 相关（兼容多种格式）
+	ToolCallID string `json:"toolCallId,omitempty"` // 通用格式
+	ToolID     string `json:"tool_id,omitempty"`    // Gemini CLI 实际使用的格式
+	ToolName   string `json:"tool_name,omitempty"`  // Gemini CLI 使用 tool_name 而非 name
 	Title      string `json:"title,omitempty"`
 	Kind       string `json:"kind,omitempty"`
+	Parameters json.RawMessage `json:"parameters,omitempty"` // Gemini CLI 使用 parameters 而非 input
 
 	// 部分事件包含 partial
 	Partial bool `json:"partial,omitempty"`
@@ -347,19 +350,33 @@ func (p *GeminiStreamParser) Parse(raw json.RawMessage, cb *BackendCallbacks, to
 	case "tool-use", "tool_use":
 		if cb.OnToolCall != nil {
 			*toolCallCounter++
-			toolCallID := evt.ToolCallID
+			// 优先使用 Gemini CLI 的 tool_id，其次 toolCallId，最后 fallback 自增
+			toolCallID := evt.ToolID
+			if toolCallID == "" {
+				toolCallID = evt.ToolCallID
+			}
 			if toolCallID == "" {
 				toolCallID = fmt.Sprintf("cli-tc-%d", *toolCallCounter)
 			}
+			// 优先使用 tool_name，其次 title/name
+			toolName := evt.ToolName
+			if toolName == "" {
+				toolName = evt.Name
+			}
 			title := evt.Title
 			if title == "" {
-				title = evt.Name
+				title = toolName
 			}
 			kind := evt.Kind
 			if kind == "" {
-				kind = classifyToolKind(evt.Name)
+				kind = classifyToolKind(toolName)
 			}
-			inputStr := string(evt.Input)
+			// 优先使用 parameters，其次 input
+			inputData := evt.Parameters
+			if len(inputData) == 0 {
+				inputData = evt.Input
+			}
+			inputStr := string(inputData)
 			cb.OnToolCall(&ToolCallEvent{
 				ToolCallID: toolCallID,
 				Title:      title,
@@ -373,8 +390,11 @@ func (p *GeminiStreamParser) Parse(raw json.RawMessage, cb *BackendCallbacks, to
 
 	case "tool-result", "tool_result":
 		if cb.OnToolCallUpdate != nil {
-			*toolCallCounter++
-			toolCallID := evt.ToolCallID
+			// 优先使用 Gemini CLI 的 tool_id 来匹配对应的 tool_use
+			toolCallID := evt.ToolID
+			if toolCallID == "" {
+				toolCallID = evt.ToolCallID
+			}
 			if toolCallID == "" {
 				toolCallID = fmt.Sprintf("cli-tc-%d", *toolCallCounter)
 			}
@@ -498,7 +518,6 @@ func (p *CodexStreamParser) Parse(raw json.RawMessage, cb *BackendCallbacks, too
 
 	case "tool-result", "function_result":
 		if cb.OnToolCallUpdate != nil {
-			*toolCallCounter++
 			toolCallID := fmt.Sprintf("cli-tc-%d", *toolCallCounter)
 			cb.OnToolCallUpdate(&ToolCallUpdateEvent{
 				ToolCallID: toolCallID,
@@ -589,7 +608,6 @@ func (p *GenericStreamParser) Parse(raw json.RawMessage, cb *BackendCallbacks, t
 
 	case "tool-result", "tool_result", "function_result":
 		if cb.OnToolCallUpdate != nil {
-			*toolCallCounter++
 			toolCallID := fmt.Sprintf("cli-tc-%d", *toolCallCounter)
 			cb.OnToolCallUpdate(&ToolCallUpdateEvent{
 				ToolCallID: toolCallID,

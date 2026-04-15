@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useChatStore, genMessageId } from './stores/chatStore';
 import { useBackendStore } from './stores/backendStore';
@@ -25,19 +25,18 @@ export default function App() {
   const showACPLogs = useChatStore((s) => s.showACPLogs);
 
   // 当前活动视图
-  const [activeView, setActiveView] = useState<'chat' | 'files'>('chat');
+  const [, setActiveView] = useState<'chat' | 'files'>('chat');
 
   // 启动时加载历史会话
   useEffect(() => {
     useChatStore.getState().loadHistorySessions();
   }, []);
 
-  const handleStartAgent = useCallback((agentId: string, workDir: string) => {
-    send({ type: 'start_agent', payload: { agentId, workDir } });
-  }, [send]);
-
-  const handleStartAgentWithResume = useCallback((agentId: string, workDir: string, geminiSessionId: string) => {
-    send({ type: 'start_agent', payload: { agentId, workDir, geminiSessionId } });
+  const handleStartAgent = useCallback((agentId: string, workDir: string, opts?: { geminiSessionId?: string; model?: string }) => {
+    const payload: Record<string, string> = { agentId, workDir };
+    if (opts?.geminiSessionId) payload.geminiSessionId = opts.geminiSessionId;
+    if (opts?.model) payload.model = opts.model;
+    send({ type: 'start_agent', payload });
   }, [send]);
 
   const handleStopAgent = useCallback((agentId: string) => {
@@ -276,14 +275,11 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const allotmentRef = useRef<InstanceType<typeof Allotment> | null>(null);
-
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--color-surface-0)' }}>
       {/* TopBar: 移动端显示完整 header，桌面端只保留弹窗逻辑 */}
       <TopBar
         onStartAgent={handleStartAgent}
-        onStartAgentWithResume={handleStartAgentWithResume}
         onStopAgent={handleStopAgent}
         launchTrigger={isMobile ? undefined : showLaunchTrigger}
         hideHeader={!isMobile}
@@ -299,11 +295,12 @@ export default function App() {
                 rootPath={activeWorkDir}
                 onClose={handleCloseFileBrowser}
                 onFileOpen={handleFileOpen}
+                onSendWS={send}
               />
             </div>
           )}
           {viewingFile && (
-            <div className="mobile-panel animate-slide-up" style={{ background: 'var(--color-surface-0)' }}>
+            <div className="mobile-panel animate-slide-in-right" style={{ background: 'var(--color-surface-0)' }}>
               <FileViewer
                 filePath={viewingFile.path}
                 fileName={viewingFile.name}
@@ -342,7 +339,7 @@ export default function App() {
 
           {/* 可拖拽分割面板 */}
           <div className="flex-1 overflow-hidden">
-            <Allotment ref={allotmentRef} proportionalLayout={false}>
+            <Allotment proportionalLayout={false}>
               {/* 文件树 (左侧面板) */}
               {fileBrowserVisible && (
                 <Allotment.Pane minSize={180} maxSize={500} preferredSize={240}>
