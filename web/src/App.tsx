@@ -6,6 +6,7 @@ import { SLASH_COMMANDS } from './types/protocol';
 import TopBar from './components/Layout/TopBar';
 import ActivityBar from './components/Layout/ActivityBar';
 import ChatView from './components/ChatView/ChatView';
+import ChatStatusBar from './components/ChatView/ChatStatusBar';
 import InputBar from './components/ChatView/InputBar';
 import FileTreeBrowser from './components/FileBrowser/FileTreeBrowser';
 import FileViewer from './components/FileBrowser/FileViewer';
@@ -17,7 +18,6 @@ export default function App() {
   const { send } = useWebSocket();
   const agentStatus = useChatStore((s) => s.agentStatus);
   const isThinking = useChatStore((s) => s.isAgentThinking);
-  const agentActivity = useChatStore((s) => s.agentActivity);
   const showFileBrowser = useChatStore((s) => s.showFileBrowser);
   const activeWorkDir = useChatStore((s) => s.activeWorkDir);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
@@ -34,8 +34,15 @@ export default function App() {
 
   const handleStartAgent = useCallback((agentId: string, workDir: string, opts?: { geminiSessionId?: string; model?: string }) => {
     const payload: Record<string, string> = { agentId, workDir };
-    if (opts?.geminiSessionId) payload.geminiSessionId = opts.geminiSessionId;
-    if (opts?.model) payload.model = opts.model;
+    if (opts?.geminiSessionId) {
+      payload.geminiSessionId = opts.geminiSessionId;
+    }
+    if (opts?.model) {
+      payload.model = opts.model;
+    }
+    if (opts && 'model' in opts) {
+      useChatStore.getState().setActiveModel(opts.model || null);
+    }
     send({ type: 'start_agent', payload });
   }, [send]);
 
@@ -57,6 +64,41 @@ export default function App() {
     useChatStore.getState().setIsAgentThinking(true);
     useChatStore.getState().clearThinkingContent();
   }, [send]);
+
+  const handleReconnectSession = useCallback(() => {
+    const store = useChatStore.getState();
+
+    if (!store.activeSessionId || !store.activeAgentId || !store.activeWorkDir) {
+      return;
+    }
+
+    if (store.agentStatus === 'running' || store.agentStatus === 'starting') {
+      return;
+    }
+
+    if (store.wsStatus !== 'connected') {
+      store.addMessage({
+        id: genMessageId(),
+        role: 'system',
+        content: '⚠️ WebSocket is not connected yet. Please wait a moment and try reconnect again.',
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    store.addMessage({
+      id: genMessageId(),
+      role: 'system',
+      content: `🔄 Reconnecting session \`${store.activeSessionId}\`...`,
+      timestamp: Date.now(),
+    });
+
+    handleStartAgent(
+      store.activeAgentId,
+      store.activeWorkDir,
+      store.activeModel ? { model: store.activeModel } : undefined,
+    );
+  }, [handleStartAgent]);
 
   const handleSlashCommand = useCallback((commandId: string) => {
     const store = useChatStore.getState();
@@ -251,6 +293,9 @@ export default function App() {
     }
   }, []);
 
+  // 用于从 ActivityBar 触发 TopBar 的 Launch 流程
+  const [showLaunchTrigger, setShowLaunchTrigger] = useState(0);
+
   const handleLaunch = useCallback(() => {
     // 触发 TopBar 中的 launch 逻辑 — 通过 ref 或设置状态
     setShowLaunchTrigger((v) => v + 1);
@@ -260,9 +305,6 @@ export default function App() {
     const agent = useChatStore.getState().agents.find((a) => a.id === useChatStore.getState().activeAgentId);
     if (agent) handleStopAgent(agent.id);
   }, [handleStopAgent]);
-
-  // 用于从 ActivityBar 触发 TopBar 的 Launch 流程
-  const [showLaunchTrigger, setShowLaunchTrigger] = useState(0);
 
   const isAgentRunning = agentStatus === 'running';
   const fileBrowserVisible = showFileBrowser && activeWorkDir;
@@ -318,8 +360,8 @@ export default function App() {
                 disabled={!isAgentRunning}
                 isThinking={isThinking}
                 onCancel={handleCancel}
-                agentActivity={agentActivity}
               />
+              <ChatStatusBar onReconnectSession={handleReconnectSession} />
             </div>
           )}
         </div>
@@ -380,8 +422,8 @@ export default function App() {
                         disabled={!isAgentRunning}
                         isThinking={isThinking}
                         onCancel={handleCancel}
-                        agentActivity={agentActivity}
                       />
+                      <ChatStatusBar onReconnectSession={handleReconnectSession} />
                     </div>
                   </Allotment.Pane>
 

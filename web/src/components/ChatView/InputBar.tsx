@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useChatStore } from '../../stores/chatStore';
 import { SLASH_COMMANDS } from '../../types/protocol';
 import type { SlashCommand } from '../../types/protocol';
 
@@ -8,143 +9,138 @@ interface Props {
   disabled?: boolean;
   isThinking?: boolean;
   onCancel?: () => void;
-  agentActivity?: 'idle' | 'thinking' | 'streaming' | 'tool_calling';
 }
 
 /**
  * InputBar 是聊天输入框组件。
  * 支持：Enter 发送、Shift+Enter 换行、/ 命令模式下拉框、自动高度调整。
  */
-export default function InputBar({ onSend, onSlashCommand, disabled, isThinking, onCancel, agentActivity = 'idle' }: Props) {
+export default function InputBar({ onSend, onSlashCommand, disabled, isThinking, onCancel }: Props) {
   const [text, setText] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Slash command state
-  const [showCommands, setShowCommands] = useState(false);
-  const [filteredCommands, setFilteredCommands] = useState<SlashCommand[]>([]);
   const [selectedCommandIdx, setSelectedCommandIdx] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const commandListRef = useRef<HTMLDivElement>(null);
 
-  // Auto-resize textarea
+  const filteredCommands = useMemo(() => {
+    if (!text.startsWith('/')) {
+      return [];
+    }
+
+    const query = text.slice(1).toLowerCase();
+    return SLASH_COMMANDS.filter((command) => {
+      return command.name.toLowerCase().includes(query)
+        || command.description.toLowerCase().includes(query);
+    });
+  }, [text]);
+
+  const showCommands = filteredCommands.length > 0;
+  const activeCommandIdx = showCommands
+    ? Math.min(selectedCommandIdx, filteredCommands.length - 1)
+    : 0;
+
   useEffect(() => {
-    const ta = textareaRef.current;
-    if (ta) {
-      ta.style.height = 'auto';
-      ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
     }
   }, [text]);
 
-  // 检测 / 命令输入
-  useEffect(() => {
-    if (text.startsWith('/')) {
-      const query = text.slice(1).toLowerCase();
-      const filtered = SLASH_COMMANDS.filter(
-        (cmd) => cmd.name.toLowerCase().includes(query) || cmd.description.toLowerCase().includes(query)
-      );
-      setFilteredCommands(filtered);
-      setShowCommands(filtered.length > 0);
-      setSelectedCommandIdx(0);
-    } else {
-      setShowCommands(false);
-    }
-  }, [text]);
-
-  const handleSubmit = useCallback(() => {
-    const trimmed = text.trim();
-    if (!trimmed || disabled) return;
-
-    // 如果是斜杠命令
-    if (showCommands && filteredCommands.length > 0) {
-      const cmd = filteredCommands[selectedCommandIdx];
-      onSlashCommand(cmd.id);
-      setText('');
-      setShowCommands(false);
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
-      return;
-    }
-
-    // 检查是否完全匹配一个命令
-    const exactCmd = SLASH_COMMANDS.find((c) => c.name === trimmed);
-    if (exactCmd) {
-      onSlashCommand(exactCmd.id);
-      setText('');
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
-      return;
-    }
-
-    onSend(trimmed);
+  const resetComposer = useCallback(() => {
     setText('');
+    setSelectedCommandIdx(0);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [text, disabled, showCommands, filteredCommands, selectedCommandIdx, onSend, onSlashCommand]);
+  }, []);
 
-  const selectCommand = useCallback((cmd: SlashCommand) => {
-    onSlashCommand(cmd.id);
-    setText('');
-    setShowCommands(false);
-    textareaRef.current?.focus();
-  }, [onSlashCommand]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // 输入法正在组合中（选词/拼音阶段），不处理 Enter 等按键
-    if (e.nativeEvent.isComposing || e.keyCode === 229) {
+  const handleSubmit = useCallback(() => {
+    const trimmedText = text.trim();
+    if (!trimmedText || disabled) {
       return;
     }
 
-    // 命令面板导航
+    if (showCommands && filteredCommands.length > 0) {
+      const command = filteredCommands[activeCommandIdx];
+      onSlashCommand(command.id);
+      resetComposer();
+      return;
+    }
+
+    const exactCommand = SLASH_COMMANDS.find((command) => command.name === trimmedText);
+    if (exactCommand) {
+      onSlashCommand(exactCommand.id);
+      resetComposer();
+      return;
+    }
+
+    onSend(trimmedText);
+    resetComposer();
+  }, [activeCommandIdx, disabled, filteredCommands, onSend, onSlashCommand, resetComposer, showCommands, text]);
+
+  const selectCommand = useCallback((command: SlashCommand) => {
+    onSlashCommand(command.id);
+    resetComposer();
+    textareaRef.current?.focus();
+  }, [onSlashCommand, resetComposer]);
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      return;
+    }
+
     if (showCommands) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedCommandIdx((i) => Math.min(i + 1, filteredCommands.length - 1));
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setSelectedCommandIdx((index) => Math.min(index + 1, filteredCommands.length - 1));
         return;
       }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedCommandIdx((i) => Math.max(i - 1, 0));
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSelectedCommandIdx((index) => Math.max(index - 1, 0));
         return;
       }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-        e.preventDefault();
+      if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+        event.preventDefault();
         if (filteredCommands.length > 0) {
-          selectCommand(filteredCommands[selectedCommandIdx]);
+          selectCommand(filteredCommands[activeCommandIdx]);
         }
         return;
       }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setShowCommands(false);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSelectedCommandIdx(0);
+        setText((value) => (value.startsWith('/') ? '/' : value));
         return;
       }
     }
 
-    // Enter 发送 (Shift+Enter 换行)
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
       handleSubmit();
     }
   };
 
-  // 保持选中项在视图内
-  useEffect(() => {
-    if (commandListRef.current) {
-      const el = commandListRef.current.children[selectedCommandIdx] as HTMLElement;
-      if (el) {
-        el.scrollIntoView({ block: 'nearest' });
-      }
+  const handleTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextText = event.target.value;
+    setText(nextText);
+    if (nextText.startsWith('/')) {
+      setSelectedCommandIdx(0);
     }
-  }, [selectedCommandIdx]);
+  };
+
+  useEffect(() => {
+    if (commandListRef.current && showCommands) {
+      const element = commandListRef.current.children[activeCommandIdx] as HTMLElement;
+      element?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeCommandIdx, showCommands]);
 
   return (
     <div
       className="glass-strong px-4 py-3 relative"
       style={{ borderTop: '1px solid var(--color-border)' }}
     >
-      {/* Slash command dropdown */}
       {showCommands && (
         <div
           ref={commandListRef}
@@ -164,44 +160,50 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
           </div>
           {(() => {
             let lastGroup = '';
-            return filteredCommands.map((cmd, i) => {
-              const showGroupHeader = cmd.group !== lastGroup;
-              lastGroup = cmd.group;
+            return filteredCommands.map((command, index) => {
+              const showGroupHeader = command.group !== lastGroup;
+              lastGroup = command.group;
               return (
-                <div key={cmd.id}>
+                <div key={command.id}>
                   {showGroupHeader && (
                     <div
                       className="px-3 py-1"
                       style={{
                         color: 'var(--color-text-muted)',
                         background: 'var(--color-surface-0)',
-                        borderTop: i > 0 ? '1px solid var(--color-border)' : 'none',
+                        borderTop: index > 0 ? '1px solid var(--color-border)' : 'none',
                         fontSize: '0.6rem',
                         letterSpacing: '0.05em',
-                        textTransform: 'uppercase' as const,
+                        textTransform: 'uppercase',
                         fontWeight: 600,
                       }}
                     >
-                      {cmd.group}
+                      {command.group}
                     </div>
                   )}
                   <button
-                    onClick={() => selectCommand(cmd)}
+                    onClick={() => selectCommand(command)}
                     className="w-full flex items-center gap-3 px-3 py-2.5 text-left transition-all duration-100 cursor-pointer"
                     style={{
-                      background: i === selectedCommandIdx ? 'var(--color-surface-2)' : 'transparent',
+                      background: index === activeCommandIdx ? 'var(--color-surface-2)' : 'transparent',
                       border: 'none',
                       color: 'var(--color-text-primary)',
                     }}
-                    onMouseEnter={() => setSelectedCommandIdx(i)}
+                    onMouseEnter={() => setSelectedCommandIdx(index)}
                   >
-                    <span className="text-base flex-shrink-0">{cmd.icon}</span>
+                    <span className="text-base flex-shrink-0">{command.icon}</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium" style={{ color: 'var(--color-accent-400)', fontFamily: 'var(--font-mono)' }}>
-                          {cmd.name}
+                        <span
+                          className="text-sm font-medium"
+                          style={{
+                            color: 'var(--color-accent-400)',
+                            fontFamily: 'var(--font-mono)',
+                          }}
+                        >
+                          {command.name}
                         </span>
-                        {cmd.scope === 'agent' && cmd.webAction === 'prompt' && (
+                        {command.scope === 'agent' && command.webAction === 'prompt' && (
                           <span
                             className="text-xs px-1 rounded"
                             style={{
@@ -213,7 +215,7 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
                             PROMPT
                           </span>
                         )}
-                        {cmd.scope === 'agent' && cmd.webAction !== 'prompt' && (
+                        {command.scope === 'agent' && command.webAction !== 'prompt' && (
                           <span
                             className="text-xs px-1 rounded"
                             style={{
@@ -227,7 +229,7 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
                         )}
                       </div>
                       <div className="text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>
-                        {cmd.description}
+                        {command.description}
                       </div>
                     </div>
                   </button>
@@ -239,25 +241,43 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
       )}
 
       <div
-        className="flex items-end gap-2 rounded-xl px-3 py-2 transition-all duration-200"
+        className="flex items-end gap-2 rounded-2xl px-3 py-2.5 transition-all duration-200"
         style={{
-          background: 'var(--color-surface-2)',
+          background: 'var(--color-surface-1)',
           border: `1px solid ${showCommands ? 'var(--color-accent-500)' : 'var(--color-border)'}`,
         }}
       >
+        {/* 左侧工具按钮 */}
+        <div className="flex items-center gap-0.5 pb-1 shrink-0">
+          <button
+            className="p-2 rounded-xl transition-all duration-150 hover:scale-110 active:scale-95 cursor-pointer"
+            style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
+            title="Attach file"
+            onClick={() => {
+              const store = useChatStore.getState();
+              store.addMessage({
+                id: `msg_${Date.now()}`,
+                role: 'system',
+                content: '📎 File upload will be available soon.',
+                timestamp: Date.now(),
+              });
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+        </div>
+
         <textarea
           ref={textareaRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={handleTextChange}
           onKeyDown={handleKeyDown}
-          placeholder={
-            disabled
-              ? 'Start an agent first...'
-              : 'Type a message or / for commands... (Enter to send, Shift+Enter for newline)'
-          }
+          placeholder={disabled ? 'Start an agent first...' : '输入消息...'}
           disabled={disabled}
           rows={1}
-          className="flex-1 resize-none outline-none text-sm min-h-[24px] disabled:opacity-40"
+          className="flex-1 resize-none outline-none text-[0.9375rem] min-h-[24px] disabled:opacity-40 py-1.5"
           style={{
             background: 'transparent',
             color: 'var(--color-text-primary)',
@@ -266,11 +286,11 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
           }}
         />
 
-        <div className="flex items-center gap-1.5 pb-0.5">
+        <div className="flex items-center gap-1 pb-1 shrink-0">
           {isThinking && onCancel && (
             <button
               onClick={onCancel}
-              className="p-2 rounded-lg transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
+              className="p-2 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
               style={{
                 background: 'var(--color-danger)',
                 color: 'white',
@@ -284,60 +304,27 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
             </button>
           )}
 
-          {/* 发送按钮提示 */}
-          <div className="text-xs hidden sm:block px-1" style={{ color: 'var(--color-text-muted)', fontSize: '0.6rem' }}>
-            ⏎
-          </div>
-
           <button
             onClick={handleSubmit}
             disabled={!text.trim() || disabled}
-            className="p-2 rounded-lg transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            className="p-2 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             style={{
               background: text.trim() && !disabled
-                ? 'linear-gradient(135deg, var(--color-brand-500), var(--color-accent-500))'
-                : 'var(--color-surface-3)',
-              color: 'white',
+                ? 'var(--color-text-primary)'
+                : 'transparent',
+              color: text.trim() && !disabled
+                ? 'var(--color-surface-0)'
+                : 'var(--color-text-muted)',
               border: 'none',
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 2L11 13" />
               <path d="M22 2L15 22L11 13L2 9L22 2Z" />
             </svg>
           </button>
         </div>
       </div>
-
-      {/* Status hints */}
-      {isThinking && (
-        <div className="flex items-center gap-2 mt-2 ml-1">
-          <div className="flex gap-1">
-            <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-accent-500)', animationDelay: '0ms' }} />
-            <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-accent-500)', animationDelay: '150ms' }} />
-            <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-accent-500)', animationDelay: '300ms' }} />
-          </div>
-          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {agentActivity === 'streaming'
-              ? 'Agent is responding...'
-              : agentActivity === 'tool_calling'
-                ? 'Agent is using tools...'
-                : 'Agent is thinking...'}
-          </span>
-        </div>
-      )}
-
-      {!isThinking && !disabled && (
-        <div className="hidden sm:flex items-center gap-3 mt-1.5 ml-1">
-          <span className="text-xs" style={{ color: 'var(--color-text-muted)', fontSize: '0.65rem' }}>
-            <kbd style={{ background: 'var(--color-surface-3)', padding: '0 4px', borderRadius: '3px' }}>Enter</kbd> send
-            {' · '}
-            <kbd style={{ background: 'var(--color-surface-3)', padding: '0 4px', borderRadius: '3px' }}>Shift+Enter</kbd> newline
-            {' · '}
-            <kbd style={{ background: 'var(--color-surface-3)', padding: '0 4px', borderRadius: '3px' }}>/</kbd> commands
-          </span>
-        </div>
-      )}
     </div>
   );
 }

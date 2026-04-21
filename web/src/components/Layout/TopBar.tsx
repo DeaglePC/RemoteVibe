@@ -52,10 +52,17 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
 
   // 当 launchTrigger 变化时（从 ActivityBar 触发），自动打开 workspace picker
   useEffect(() => {
-    if (launchTrigger && launchTrigger > 0) {
-      handleLaunchClick();
+    if (!(launchTrigger && launchTrigger > 0)) {
+      return undefined;
     }
-  }, [launchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const frameId = window.requestAnimationFrame(() => {
+      setShowWorkspacePicker(true);
+      setShowMobileMenu(false);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [launchTrigger]);
 
   const handleFolderSelect = (path: string) => {
     setShowFolderPicker(false);
@@ -87,7 +94,6 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
     setPendingWorkDir(null);
     if (activeAgent) {
       useChatStore.getState().createSession(activeAgent.id, path);
-      useChatStore.getState().setAgentStatus('starting');
       onStartAgent(activeAgent.id, path, selectedModel ? { model: selectedModel } : undefined);
       recordWorkspace(path);
     }
@@ -100,8 +106,6 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
     store.restoreSession(sessionId);
     const session = store.sessions.find((s) => s.id === sessionId);
     if (session && activeAgent) {
-      // 立即设为 starting，避免在后端回复前显示 Offline
-      store.setAgentStatus('starting');
       onStartAgent(activeAgent.id, session.workDir);
       recordWorkspace(session.workDir);
     }
@@ -114,8 +118,7 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
     const workDir = pendingWorkDir;
     if (workDir && activeAgent) {
       const store = useChatStore.getState();
-      store.createSession(activeAgent.id, workDir);
-      store.setAgentStatus('starting');
+      store.createSession(activeAgent.id, workDir, selectedModel || null);
       store.addMessage({
         id: `msg_${Date.now()}_resume`,
         role: 'system',
@@ -215,7 +218,6 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
       : 'var(--color-text-muted)';
 
   const statusText = isRunning ? 'Connected' : isStarting ? 'Starting' : 'Offline';
-  const activeWorkspaceName = activeWorkDir?.split('/').filter(Boolean).pop() || activeWorkDir || '';
 
   // ==================== Session List Dropdown Content ====================
   const sessionDropdownContent = (
@@ -605,115 +607,59 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
     <header className="sm:hidden glass-strong z-10 safe-top"
       style={{ borderBottom: '1px solid var(--color-border)' }}>
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-        {/* Left: Logo + Status */}
+        {/* Left: Back + Session info */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0"
-            style={{
-              background: 'linear-gradient(135deg, var(--color-brand-500), var(--color-accent-500))',
-            }}>
-            🐾
-          </div>
+          <button
+            className="w-8 h-8 rounded-lg flex items-center justify-center active:scale-95 cursor-pointer flex-shrink-0"
+            style={{ background: 'transparent', color: 'var(--color-text-secondary)', border: 'none' }}
+            title="Back"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5" />
+              <path d="M12 19l-7-7 7-7" />
+            </svg>
+          </button>
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
+            <div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text-primary)' }}>
+              {activeAgent?.name || 'BaoMiHua'}
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
               <div
-                className={`w-2 h-2 rounded-full flex-shrink-0 ${isRunning ? 'animate-pulse-glow' : ''}`}
+                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isRunning ? 'animate-pulse-glow' : ''}`}
                 style={{ background: statusDotColor }}
               />
-              <span className="text-xs font-medium truncate" style={{ color: 'var(--color-text-secondary)' }}>
-                {statusText}
+              <span className="text-[11px] truncate" style={{ color: 'var(--color-text-muted)' }}>
+                {activeAgent?.mode || 'claude'} · {useChatStore.getState().activeModel || 'default'}
               </span>
-              {/* WS status dot */}
-              <div className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                style={{
-                  background: wsStatus === 'connected'
-                    ? 'var(--color-success)'
-                    : wsStatus === 'connecting'
-                      ? 'var(--color-warning)'
-                      : 'var(--color-danger)',
-                }}
-              />
             </div>
-            {isRunning && activeWorkspaceName && (
-              <div
-                className="text-[11px] truncate mt-0.5 max-w-[120px]"
-                style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}
-              >
-                {activeWorkspaceName}
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Center: Quick actions */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {!isRunning && !isStarting && activeAgent && (
-            <button
-              onClick={handleLaunchClick}
-              className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl active:scale-95 cursor-pointer"
-              style={{
-                background: 'linear-gradient(135deg, var(--color-brand-500), var(--color-accent-500))',
-                color: 'white',
-                border: 'none',
-              }}
-            >
-              <Play size={14} />
-              <span>Launch</span>
-            </button>
-          )}
-
-          {isStarting && (
-            <div className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-xl"
-              style={{ background: 'var(--color-surface-2)', color: 'var(--color-warning)' }}>
-              <LoaderCircle size={14} className="animate-spin" />
-              <span className="font-medium">Starting</span>
-            </div>
-          )}
-
-          {isRunning && (
-            <>
-              <button
-                onClick={handleToggleFileBrowser}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl active:scale-95 cursor-pointer"
-                style={{
-                  background: showFileBrowser ? 'var(--color-surface-3)' : 'var(--color-surface-2)',
-                  color: showFileBrowser ? 'var(--color-accent-400)' : 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
-                }}
-                title="Open file browser"
-              >
-                <FolderOpen size={15} />
-                <span className="text-xs font-medium">Files</span>
-              </button>
-
-              <button
-                onClick={() => activeAgent && onStopAgent(activeAgent.id)}
-                className="w-10 h-10 rounded-full flex items-center justify-center active:scale-95 cursor-pointer"
-                style={{
-                  background: 'var(--color-surface-2)',
-                  color: 'var(--color-danger)',
-                  border: '1px solid var(--color-danger)',
-                }}
-                title="Stop agent"
-              >
-                <Square size={14} fill="currentColor" />
-              </button>
-            </>
-          )}
+        {/* Right: Actions */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            className="w-8 h-8 rounded-lg flex items-center justify-center active:scale-95 cursor-pointer"
+            style={{ background: 'transparent', color: 'var(--color-text-secondary)', border: 'none' }}
+            title="Copy conversation"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            className="w-8 h-8 rounded-lg flex items-center justify-center active:scale-95 cursor-pointer"
+            style={{
+              background: showMobileMenu ? 'var(--color-surface-3)' : 'transparent',
+              color: 'var(--color-text-secondary)',
+              border: 'none',
+            }}
+            title={showMobileMenu ? 'Close menu' : 'Open menu'}
+          >
+            {showMobileMenu ? <X size={16} /> : <Menu size={16} />}
+          </button>
         </div>
-
-        {/* Right: Menu button */}
-        <button
-          onClick={() => setShowMobileMenu(!showMobileMenu)}
-          className="w-10 h-10 rounded-xl flex items-center justify-center active:scale-95 cursor-pointer flex-shrink-0"
-          style={{
-            background: showMobileMenu ? 'var(--color-surface-3)' : 'transparent',
-            color: 'var(--color-text-secondary)',
-            border: 'none',
-          }}
-          title={showMobileMenu ? 'Close menu' : 'Open menu'}
-        >
-          {showMobileMenu ? <X size={18} /> : <Menu size={18} />}
-        </button>
       </div>
 
       {/* Mobile dropdown menu */}
@@ -737,6 +683,68 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
               }}
               onClick={(e) => e.stopPropagation()}
             >
+              {/* Quick Actions */}
+              <div className="px-3 py-2.5 flex items-center gap-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                {!isRunning && !isStarting && activeAgent && (
+                  <button
+                    onClick={() => {
+                      setShowMobileMenu(false);
+                      handleLaunchClick();
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl active:scale-95 cursor-pointer"
+                    style={{
+                      background: 'linear-gradient(135deg, var(--color-brand-500), var(--color-accent-500))',
+                      color: 'white',
+                      border: 'none',
+                    }}
+                  >
+                    <Play size={14} />
+                    <span>Launch</span>
+                  </button>
+                )}
+                {isRunning && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        handleToggleFileBrowser();
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl active:scale-95 cursor-pointer"
+                      style={{
+                        background: showFileBrowser ? 'var(--color-surface-3)' : 'var(--color-surface-2)',
+                        color: showFileBrowser ? 'var(--color-accent-400)' : 'var(--color-text-secondary)',
+                        border: '1px solid var(--color-border)',
+                      }}
+                    >
+                      <FolderOpen size={14} />
+                      <span>Files</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        if (activeAgent) onStopAgent(activeAgent.id);
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl active:scale-95 cursor-pointer"
+                      style={{
+                        background: 'var(--color-surface-2)',
+                        color: 'var(--color-danger)',
+                        border: '1px solid var(--color-danger)',
+                      }}
+                    >
+                      <Square size={14} fill="currentColor" />
+                      <span>Stop</span>
+                    </button>
+                  </>
+                )}
+                {isStarting && (
+                  <div className="flex-1 flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-xl"
+                    style={{ background: 'var(--color-surface-2)', color: 'var(--color-warning)' }}>
+                    <LoaderCircle size={14} className="animate-spin" />
+                    <span className="font-medium">Starting...</span>
+                  </div>
+                )}
+              </div>
+
               {/* Agent selector */}
               {agents.length > 0 && (
                 <div className="px-3 py-2.5" style={{ borderBottom: '1px solid var(--color-border)' }}>

@@ -861,10 +861,35 @@ func (s *Server) broadcast(msg *ServerMessage) {
 // ==================== Gemini CLI Native Sessions ====================
 
 // geminiSessionToolResultDisplay 表示 Gemini 原生会话里工具调用的展示信息。
+// Gemini CLI 的 resultDisplay 既可能是对象，也可能是纯字符串摘要。
 type geminiSessionToolResultDisplay struct {
+	Text      string `json:"-"`
 	FileName  string `json:"fileName,omitempty"`
 	FilePath  string `json:"filePath,omitempty"`
 	IsNewFile bool   `json:"isNewFile,omitempty"`
+}
+
+// UnmarshalJSON 兼容 Gemini resultDisplay 的字符串和对象两种形态。
+func (r *geminiSessionToolResultDisplay) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*r = geminiSessionToolResultDisplay{}
+		return nil
+	}
+
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		r.Text = strings.TrimSpace(text)
+		return nil
+	}
+
+	type resultDisplayAlias geminiSessionToolResultDisplay
+	var decoded resultDisplayAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	*r = geminiSessionToolResultDisplay(decoded)
+	return nil
 }
 
 // geminiSessionToolCall 表示 Gemini 原生会话里的一次工具调用。
@@ -1213,6 +1238,9 @@ func summarizeGeminiToolCalls(toolCalls []geminiSessionToolCall) string {
 		}
 
 		detail := strings.TrimSpace(toolCall.Description)
+		if detail == "" && toolCall.ResultDisplay != nil {
+			detail = strings.TrimSpace(toolCall.ResultDisplay.Text)
+		}
 		if detail == "" && toolCall.ResultDisplay != nil {
 			fileName := strings.TrimSpace(toolCall.ResultDisplay.FileName)
 			if fileName == "" && toolCall.ResultDisplay.FilePath != "" {

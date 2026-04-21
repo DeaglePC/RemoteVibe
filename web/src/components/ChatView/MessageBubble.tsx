@@ -9,25 +9,40 @@ interface Props {
   index: number;
 }
 
+const EMOJI_REGEX = /^(\p{Emoji_Presentation}|\p{Extended_Pictographic})(\s+)(.*)$/u;
+
+/**
+ * 从系统消息内容中提取前置 emoji 图标和剩余文本。
+ */
+function parseSystemContent(content: string): { icon: string | null; text: string } {
+  const match = EMOJI_REGEX.exec(content);
+  if (match) {
+    return { icon: match[1], text: match[3] || '' };
+  }
+  return { icon: null, text: content };
+}
+
 export default function MessageBubble({ message, index }: Props) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
   if (isSystem) {
+    const { icon, text } = parseSystemContent(message.content);
     return (
       <div
         className="animate-fade-in-up flex justify-center py-2"
         style={{ animationDelay: `${index * 30}ms` }}
       >
         <div
-          className="text-xs px-4 py-2 rounded-full max-w-[85%]"
+          className="inline-flex items-center gap-1.5 text-[0.72rem] px-3 py-1.5 rounded-lg max-w-[85%]"
           style={{
-            background: 'var(--color-surface-2)',
-            color: 'var(--color-text-secondary)',
+            background: 'var(--color-surface-1)',
+            color: 'var(--color-text-muted)',
             border: '1px solid var(--color-border)',
           }}
         >
-          {message.content}
+          {icon && <span className="text-xs flex-shrink-0">{icon}</span>}
+          <span className="truncate">{text}</span>
         </div>
       </div>
     );
@@ -35,23 +50,20 @@ export default function MessageBubble({ message, index }: Props) {
 
   return (
     <div
-      className={`animate-fade-in-up flex ${isUser ? 'justify-end' : 'justify-start'} py-1.5`}
+      className={`animate-fade-in-up flex ${isUser ? 'justify-end' : 'justify-start'} py-1`}
       style={{ animationDelay: `${index * 30}ms` }}
     >
       <div
-        className={`max-w-[95%] sm:max-w-[88%] rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 ${isUser ? 'rounded-br-md' : 'rounded-bl-md'}`}
+        className={`max-w-[92%] sm:max-w-[85%] ${isUser ? 'rounded-2xl rounded-br-sm px-4 py-2' : 'px-1 py-1'}`}
         style={{
-          background: isUser
-            ? 'linear-gradient(135deg, var(--color-brand-600), var(--color-brand-500))'
-            : 'var(--color-surface-2)',
+          background: isUser ? 'var(--color-surface-3)' : 'transparent',
           color: 'var(--color-text-primary)',
-          border: isUser ? 'none' : '1px solid var(--color-border)',
         }}
       >
         {isUser ? (
-          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
         ) : (
-          <div className="markdown-body text-sm">
+          <div className="markdown-body text-[0.9375rem] leading-relaxed">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
@@ -65,7 +77,7 @@ export default function MessageBubble({ message, index }: Props) {
                         language={match[1]}
                         PreTag="div"
                         customStyle={{
-                          margin: '0.5em 0',
+                          margin: '0.75em 0',
                           borderRadius: '0.75rem',
                           fontSize: '0.82em',
                         }}
@@ -88,8 +100,8 @@ export default function MessageBubble({ message, index }: Props) {
         )}
 
         <div
-          className="text-right mt-1"
-          style={{ fontSize: '0.65rem', color: isUser ? 'rgba(255,255,255,0.5)' : 'var(--color-text-muted)' }}
+          className="text-right mt-1 opacity-0 hover:opacity-100 transition-opacity duration-200"
+          style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)' }}
         >
           {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>

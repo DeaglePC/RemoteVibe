@@ -26,10 +26,10 @@ export default function ThinkingBlock({ content, isActive }: Props) {
 
   return (
     <div
-      className="animate-fade-in-up flex justify-start py-1.5"
+      className="animate-fade-in-up flex justify-start py-1"
     >
       <div
-        className="max-w-[95%] sm:max-w-[88%] rounded-2xl overflow-hidden"
+        className="max-w-[92%] sm:max-w-[85%] rounded-2xl overflow-hidden"
         style={{
           border: '1px solid var(--color-border)',
           background: 'var(--color-surface-1)',

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -64,5 +65,60 @@ func TestExtractGeminiMessageText_FallsBackToToolSummary(t *testing.T) {
 	}
 	if !strings.Contains(got, "start.ps1") {
 		t.Fatalf("tool summary should contain file name, got %q", got)
+	}
+}
+
+func TestGeminiSessionFile_UnmarshalAcceptsStringResultDisplay(t *testing.T) {
+	data := []byte(`{
+		"sessionId": "session-1",
+		"messages": [
+			{
+				"type": "gemini",
+				"content": "",
+				"toolCalls": [
+					{
+						"name": "search_file",
+						"displayName": "SearchFile",
+						"resultDisplay": "Found 17 matching file(s)"
+					}
+				]
+			}
+		]
+	}`)
+
+	var session geminiSessionFile
+	if err := json.Unmarshal(data, &session); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if len(session.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(session.Messages))
+	}
+	if len(session.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(session.Messages[0].ToolCalls))
+	}
+	if got := session.Messages[0].ToolCalls[0].ResultDisplay.Text; got != "Found 17 matching file(s)" {
+		t.Fatalf("resultDisplay text = %q, want %q", got, "Found 17 matching file(s)")
+	}
+}
+
+func TestExtractGeminiMessageText_FallsBackToStringResultDisplay(t *testing.T) {
+	message := geminiSessionMessageFile{
+		Type:    "gemini",
+		Content: "",
+		ToolCalls: []geminiSessionToolCall{
+			{
+				Name:        "search_file",
+				DisplayName: "SearchFile",
+				ResultDisplay: &geminiSessionToolResultDisplay{
+					Text: "Found 17 matching file(s)",
+				},
+			},
+		},
+	}
+
+	got := extractGeminiMessageText(message)
+	if !strings.Contains(got, "Found 17 matching file(s)") {
+		t.Fatalf("tool summary should contain resultDisplay text, got %q", got)
 	}
 }

@@ -1,16 +1,17 @@
 import { create } from 'zustand';
 import type {
+  ACPLogPayload,
   AgentInfo,
-  ToolCallPayload,
-  ToolCallContent,
+  FileChangePayload,
+  FSEventPayload,
+  GeminiSessionInfo,
   PermissionRequestPayload,
   PlanEntry,
-  GeminiSessionInfo,
-  FileChangePayload,
-  ACPLogPayload,
-  FSEventPayload,
+  ToolCallContent,
+  ToolCallPayload,
   TurnStats,
 } from '../types/protocol';
+import { getApiBaseUrl, getAuthHeaders } from './backendStore';
 
 // ==================== Message Types ====================
 
@@ -35,12 +36,14 @@ export interface Session {
   name: string;
   agentId: string;
   workDir: string;
+  activeModel: string | null;
   messages: ChatMessage[];
   toolCalls: Map<string, ToolCallState>;
   pendingPermissions: PermissionRequestPayload[];
   planEntries: PlanEntry[];
   isAgentThinking: boolean;
   agentStatus: string;
+  lastTurnStats: TurnStats | null;
   createdAt: number;
 }
 
@@ -52,10 +55,12 @@ interface SerializedSession {
   name: string;
   agentId: string;
   workDir: string;
+  activeModel: string | null;
   messages: ChatMessage[];
   toolCalls: [string, ToolCallState][];
   planEntries: PlanEntry[];
   agentStatus: string;
+  lastTurnStats: TurnStats | null;
   createdAt: number;
 }
 
@@ -68,102 +73,7 @@ interface PersistedData {
 const STORAGE_VERSION = 1;
 const MAX_HISTORY_SESSIONS = 50; // 最多保留的历史会话数量
 
-// ==================== 远程持久化辅助函数 ====================
-
-// API 基础 URL 和认证 headers 统一从 backendStore 获取
-import { getApiBaseUrl, getAuthHeaders } from './backendStore';
-
-/** 将 Session 序列化为可存储的 JSON 对象 */
-function serializeSession(session: Session): SerializedSession {
-  return {
-    id: session.id,
-    name: session.name,
-    agentId: session.agentId,
-    workDir: session.workDir,
-    messages: session.messages,
-    toolCalls: Array.from(session.toolCalls.entries()),
-    planEntries: session.planEntries,
-    agentStatus: session.agentStatus === 'running' ? 'stopped' : session.agentStatus,
-    createdAt: session.createdAt,
-  };
-}
-
-/** 将序列化数据还原为 Session 对象 */
-function deserializeSession(data: SerializedSession): Session {
-  // 兼容旧数据：tool call 可能没有 createdAt 字段
-  const rawToolCalls = data.toolCalls || [];
-  const toolCalls = new Map(
-    rawToolCalls.map(([key, tc]) => [key, { ...tc, createdAt: tc.createdAt || data.createdAt || 0 }])
-  );
-  return {
-    ...data,
-    toolCalls,
-    pendingPermissions: [], // 历史会话不恢复权限请求
-    isAgentThinking: false,
-    agentStatus: data.agentStatus === 'running' ? 'stopped' : (data.agentStatus || 'stopped'),
-  };
-}
-
-/** 从远程服务器加载会话数据 */
-async function loadPersistedSessions(): Promise<{ sessions: Session[]; activeSessionId: string | null }> {
-  try {
-    const resp = await fetch(`${getApiBaseUrl()}/api/sessions`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
-    if (!resp.ok) {
-      console.warn('Failed to load sessions from server:', resp.statusText);
-      return { sessions: [], activeSessionId: null };
-    }
-    const data: PersistedData = await resp.json();
-    if (data.version !== STORAGE_VERSION) {
-      // 版本不匹配，清空重来
-      return { sessions: [], activeSessionId: null };
-    }
-    const sessions = (data.sessions || []).map(deserializeSession);
-    return {
-      sessions,
-      activeSessionId: data.activeSessionId,
-    };
-  } catch (err) {
-    console.warn('Failed to load sessions from server:', err);
-    return { sessions: [], activeSessionId: null };
-  }
-}
-
-/** 保存会话数据到远程服务器（防抖） */
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-function persistSessions(sessions: Session[], activeSessionId: string | null): void {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-  }
-  saveTimer = setTimeout(() => {
-    try {
-      // 只保留最近 N 个会话，并且只保留有消息的会话
-      const toSave = sessions
-        .filter((s) => s.messages.length > 0)
-        .slice(-MAX_HISTORY_SESSIONS);
-
-      const data: PersistedData = {
-        sessions: toSave.map(serializeSession),
-        activeSessionId,
-        version: STORAGE_VERSION,
-      };
-
-      fetch(`${getApiBaseUrl()}/api/sessions`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(data),
-      }).catch((err) => {
-        console.warn('Failed to persist sessions to server:', err);
-      });
-    } catch {
-      console.warn('Failed to persist sessions');
-    }
-  }, 500); // 500ms 防抖
-}
-
-// ==================== Store ====================
+// ==================== Store Types ====================
 
 interface ChatState {
   // Connection
@@ -181,7 +91,7 @@ interface ChatState {
   // Sessions
   sessions: Session[];
   activeSessionId: string | null;
-  createSession: (agentId: string, workDir: string) => string;
+  createSession: (agentId: string, workDir: string, model?: string | null) => string;
   switchSession: (sessionId: string) => void;
   removeSession: (sessionId: string) => void;
 
@@ -193,6 +103,10 @@ interface ChatState {
   // Active working directory (set when agent starts)
   activeWorkDir: string | null;
   setActiveWorkDir: (dir: string | null) => void;
+
+  // Active model / latest runtime stats
+  activeModel: string | null;
+  setActiveModel: (model: string | null) => void;
 
   // File browser visibility
   showFileBrowser: boolean;
@@ -268,6 +182,124 @@ interface ChatState {
   setLastTurnStats: (stats: TurnStats | null) => void;
 }
 
+// ==================== Persistence Helpers ====================
+
+/** 规范化可恢复会话的状态，避免把瞬时连接态持久化后错误恢复。 */
+function normalizeRestorableAgentStatus(status: string | null | undefined): string {
+  if (status === 'running' || status === 'starting') {
+    return 'stopped';
+  }
+
+  return status || 'stopped';
+}
+
+/** 将 Session 序列化为可存储的 JSON 对象 */
+function serializeSession(session: Session): SerializedSession {
+  return {
+    id: session.id,
+    name: session.name,
+    agentId: session.agentId,
+    workDir: session.workDir,
+    activeModel: session.activeModel,
+    messages: session.messages,
+    toolCalls: Array.from(session.toolCalls.entries()),
+    planEntries: session.planEntries,
+    agentStatus: normalizeRestorableAgentStatus(session.agentStatus),
+    lastTurnStats: session.lastTurnStats,
+    createdAt: session.createdAt,
+  };
+}
+
+/** 将序列化数据还原为 Session 对象 */
+function deserializeSession(data: SerializedSession): Session {
+  const rawToolCalls = data.toolCalls || [];
+  const toolCalls = new Map(
+    rawToolCalls.map(([key, toolCall]) => [
+      key,
+      { ...toolCall, createdAt: toolCall.createdAt || data.createdAt || 0 },
+    ]),
+  );
+
+  return {
+    id: data.id,
+    name: data.name,
+    agentId: data.agentId,
+    workDir: data.workDir,
+    activeModel: data.activeModel || null,
+    messages: data.messages || [],
+    toolCalls,
+    pendingPermissions: [], // 历史会话不恢复权限请求
+    planEntries: data.planEntries || [],
+    isAgentThinking: false,
+    agentStatus: normalizeRestorableAgentStatus(data.agentStatus),
+    lastTurnStats: data.lastTurnStats || null,
+    createdAt: data.createdAt,
+  };
+}
+
+/** 从远程服务器加载会话数据 */
+async function loadPersistedSessions(): Promise<{ sessions: Session[]; activeSessionId: string | null }> {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/sessions`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      console.warn('Failed to load sessions from server:', response.statusText);
+      return { sessions: [], activeSessionId: null };
+    }
+
+    const data: PersistedData = await response.json();
+    if (data.version !== STORAGE_VERSION) {
+      return { sessions: [], activeSessionId: null };
+    }
+
+    return {
+      sessions: (data.sessions || []).map(deserializeSession),
+      activeSessionId: data.activeSessionId,
+    };
+  } catch (error) {
+    console.warn('Failed to load sessions from server:', error);
+    return { sessions: [], activeSessionId: null };
+  }
+}
+
+/** 保存会话数据到远程服务器（防抖） */
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function persistSessions(sessions: Session[], activeSessionId: string | null): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+  }
+
+  saveTimer = setTimeout(() => {
+    try {
+      const sessionsToSave = sessions
+        .filter((session) => session.messages.length > 0)
+        .slice(-MAX_HISTORY_SESSIONS);
+
+      const data: PersistedData = {
+        sessions: sessionsToSave.map(serializeSession),
+        activeSessionId,
+        version: STORAGE_VERSION,
+      };
+
+      fetch(`${getApiBaseUrl()}/api/sessions`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }).catch((error) => {
+        console.warn('Failed to persist sessions to server:', error);
+      });
+    } catch (error) {
+      console.warn('Failed to persist sessions:', error);
+    }
+  }, 500);
+}
+
+// ==================== Store Helpers ====================
+
 let messageIdCounter = 0;
 export function genMessageId(): string {
   return `msg_${Date.now()}_${++messageIdCounter}`;
@@ -278,25 +310,112 @@ function genSessionId(): string {
   return `session_${Date.now()}_${++sessionIdCounter}`;
 }
 
+function buildSessionName(agentName: string | undefined, workDir: string): string {
+  const worktreeName = workDir.split('/').filter(Boolean).pop() || workDir;
+  return `${agentName || 'Agent'} - ${worktreeName}`;
+}
+
+function createSessionSnapshot(
+  session: Session,
+  state: Pick<
+    ChatState,
+    | 'messages'
+    | 'toolCalls'
+    | 'pendingPermissions'
+    | 'planEntries'
+    | 'isAgentThinking'
+    | 'agentStatus'
+    | 'activeModel'
+    | 'lastTurnStats'
+  >,
+): Session {
+  return {
+    ...session,
+    messages: state.messages,
+    toolCalls: state.toolCalls,
+    pendingPermissions: state.pendingPermissions,
+    planEntries: state.planEntries,
+    isAgentThinking: state.isAgentThinking,
+    agentStatus: state.agentStatus,
+    activeModel: state.activeModel,
+    lastTurnStats: state.lastTurnStats,
+  };
+}
+
+function syncSessionsWithCurrentState(state: ChatState): Session[] {
+  if (!state.activeSessionId) {
+    return state.sessions;
+  }
+
+  return state.sessions.map((session) => {
+    if (session.id !== state.activeSessionId) {
+      return session;
+    }
+    return createSessionSnapshot(session, state);
+  });
+}
+
+function getSessionStatePatch(session: Session): Pick<
+  ChatState,
+  | 'activeAgentId'
+  | 'activeWorkDir'
+  | 'activeModel'
+  | 'messages'
+  | 'toolCalls'
+  | 'pendingPermissions'
+  | 'planEntries'
+  | 'isAgentThinking'
+  | 'agentStatus'
+  | 'lastTurnStats'
+> {
+  return {
+    activeAgentId: session.agentId,
+    activeWorkDir: session.workDir,
+    activeModel: session.activeModel,
+    messages: session.messages,
+    toolCalls: session.toolCalls,
+    pendingPermissions: session.pendingPermissions,
+    planEntries: session.planEntries,
+    isAgentThinking: session.isAgentThinking,
+    agentStatus: session.agentStatus,
+    lastTurnStats: session.lastTurnStats,
+  };
+}
+
+function getEmptySessionStatePatch(): Pick<
+  ChatState,
+  | 'activeAgentId'
+  | 'activeWorkDir'
+  | 'activeModel'
+  | 'messages'
+  | 'toolCalls'
+  | 'pendingPermissions'
+  | 'planEntries'
+  | 'isAgentThinking'
+  | 'agentStatus'
+  | 'lastTurnStats'
+> {
+  return {
+    activeAgentId: null,
+    activeWorkDir: null,
+    activeModel: null,
+    messages: [],
+    toolCalls: new Map(),
+    pendingPermissions: [],
+    planEntries: [],
+    isAgentThinking: false,
+    agentStatus: 'idle',
+    lastTurnStats: null,
+  };
+}
+
 /** 保存当前活跃会话的状态到 sessions 数组，然后触发持久化 */
 function saveCurrentAndPersist(state: ChatState): void {
-  let sessions = [...state.sessions];
-  if (state.activeSessionId) {
-    const idx = sessions.findIndex((s) => s.id === state.activeSessionId);
-    if (idx >= 0) {
-      sessions[idx] = {
-        ...sessions[idx],
-        messages: state.messages,
-        toolCalls: state.toolCalls,
-        pendingPermissions: state.pendingPermissions,
-        planEntries: state.planEntries,
-        isAgentThinking: state.isAgentThinking,
-        agentStatus: state.agentStatus,
-      };
-    }
-  }
+  const sessions = syncSessionsWithCurrentState(state);
   persistSessions(sessions, state.activeSessionId);
 }
+
+// ==================== Store ====================
 
 export const useChatStore = create<ChatState>((set, get) => ({
   // Connection
@@ -311,171 +430,158 @@ export const useChatStore = create<ChatState>((set, get) => ({
   agentStatus: 'idle',
   setAgentStatus: (status) => {
     set({ agentStatus: status });
-    // 状态变化时触发持久化
     saveCurrentAndPersist(get());
   },
 
   // Sessions
   sessions: [],
   activeSessionId: null,
-  createSession: (agentId, workDir) => {
+  createSession: (agentId, workDir, model = null) => {
+    const state = get();
+    const sessions = syncSessionsWithCurrentState(state);
+    const agent = state.agents.find((item) => item.id === agentId);
     const id = genSessionId();
-    const agent = get().agents.find((a) => a.id === agentId);
+    const createdAt = Date.now();
     const session: Session = {
       id,
-      name: `${agent?.name || agentId} - ${workDir.split('/').pop() || workDir}`,
+      name: buildSessionName(agent?.name, workDir),
       agentId,
       workDir,
+      activeModel: model,
       messages: [],
       toolCalls: new Map(),
       pendingPermissions: [],
       planEntries: [],
       isAgentThinking: false,
       agentStatus: 'starting',
-      createdAt: Date.now(),
+      lastTurnStats: null,
+      createdAt,
     };
-
-    // 保存当前活跃会话状态后再切换
-    const state = get();
-    let updatedSessions = [...state.sessions];
-    if (state.activeSessionId) {
-      const currentIdx = updatedSessions.findIndex((s) => s.id === state.activeSessionId);
-      if (currentIdx >= 0) {
-        updatedSessions[currentIdx] = {
-          ...updatedSessions[currentIdx],
-          messages: state.messages,
-          toolCalls: state.toolCalls,
-          pendingPermissions: state.pendingPermissions,
-          planEntries: state.planEntries,
-          isAgentThinking: state.isAgentThinking,
-          agentStatus: state.agentStatus,
-        };
-      }
-    }
+    const nextSessions = [...sessions, session];
 
     set({
-      sessions: [...updatedSessions, session],
+      sessions: nextSessions,
       activeSessionId: id,
+      activeAgentId: agentId,
       activeWorkDir: workDir,
+      activeModel: model,
       messages: [],
       toolCalls: new Map(),
       pendingPermissions: [],
       planEntries: [],
       isAgentThinking: false,
+      agentStatus: 'starting',
+      lastTurnStats: null,
     });
 
-    persistSessions([...updatedSessions, session], id);
+    persistSessions(nextSessions, id);
     return id;
   },
   switchSession: (sessionId) => {
     const state = get();
-    // Save current session state
-    let updatedSessions = [...state.sessions];
-    if (state.activeSessionId) {
-      const currentIdx = updatedSessions.findIndex((s) => s.id === state.activeSessionId);
-      if (currentIdx >= 0) {
-        updatedSessions[currentIdx] = {
-          ...updatedSessions[currentIdx],
-          messages: state.messages,
-          toolCalls: state.toolCalls,
-          pendingPermissions: state.pendingPermissions,
-          planEntries: state.planEntries,
-          isAgentThinking: state.isAgentThinking,
-          agentStatus: state.agentStatus,
-        };
-      }
+    const sessions = syncSessionsWithCurrentState(state);
+    const targetSession = sessions.find((session) => session.id === sessionId);
+
+    if (!targetSession) {
+      return;
     }
-    // Load target session
-    const target = updatedSessions.find((s) => s.id === sessionId);
-    if (target) {
-      set({
-        sessions: updatedSessions,
-        activeSessionId: sessionId,
-        activeAgentId: target.agentId,
-        activeWorkDir: target.workDir,
-        messages: target.messages,
-        toolCalls: target.toolCalls,
-        pendingPermissions: target.pendingPermissions,
-        planEntries: target.planEntries,
-        isAgentThinking: target.isAgentThinking,
-        agentStatus: target.agentStatus,
-      });
-      persistSessions(updatedSessions, sessionId);
-    }
+
+    set({
+      sessions,
+      activeSessionId: sessionId,
+      ...getSessionStatePatch(targetSession),
+    });
+    persistSessions(sessions, sessionId);
   },
   removeSession: (sessionId) => {
-    set((s) => {
-      const filtered = s.sessions.filter((sess) => sess.id !== sessionId);
-      const isActive = s.activeSessionId === sessionId;
-      const newActiveId = isActive ? (filtered[0]?.id || null) : s.activeSessionId;
-      persistSessions(filtered, newActiveId);
-      return {
-        sessions: filtered,
-        activeSessionId: newActiveId,
-      };
+    const state = get();
+    const syncedSessions = syncSessionsWithCurrentState(state);
+    const nextSessions = syncedSessions.filter((session) => session.id !== sessionId);
+    const removedActiveSession = state.activeSessionId === sessionId;
+    const nextActiveSession = removedActiveSession
+      ? nextSessions[0] || null
+      : nextSessions.find((session) => session.id === state.activeSessionId) || null;
+    const nextActiveSessionId = nextActiveSession?.id || null;
+
+    set({
+      sessions: nextSessions,
+      activeSessionId: nextActiveSessionId,
+      ...(nextActiveSession ? getSessionStatePatch(nextActiveSession) : getEmptySessionStatePatch()),
     });
+
+    persistSessions(nextSessions, nextActiveSessionId);
   },
 
   // History sessions
   loadHistorySessions: () => {
-    // 异步从远程服务器加载
-    loadPersistedSessions().then(({ sessions: historySessions }) => {
-      if (historySessions.length > 0) {
-        set({ sessions: historySessions });
-        // 不自动恢复上次活跃会话的实时状态，保持 idle
+    loadPersistedSessions().then(({ sessions, activeSessionId }) => {
+      if (sessions.length === 0) {
+        return;
       }
+
+      const targetSession = activeSessionId
+        ? sessions.find((session) => session.id === activeSessionId) || null
+        : null;
+
+      set({
+        sessions,
+        activeSessionId: targetSession?.id || null,
+        ...(targetSession ? getSessionStatePatch(targetSession) : getEmptySessionStatePatch()),
+      });
     });
   },
   restoreSession: (sessionId) => {
     const state = get();
-    const target = state.sessions.find((s) => s.id === sessionId);
-    if (!target) return;
+    const sessions = syncSessionsWithCurrentState(state);
+    const targetSession = sessions.find((session) => session.id === sessionId);
 
-    // 保存当前会话
-    let updatedSessions = [...state.sessions];
-    if (state.activeSessionId) {
-      const currentIdx = updatedSessions.findIndex((s) => s.id === state.activeSessionId);
-      if (currentIdx >= 0) {
-        updatedSessions[currentIdx] = {
-          ...updatedSessions[currentIdx],
-          messages: state.messages,
-          toolCalls: state.toolCalls,
-          pendingPermissions: state.pendingPermissions,
-          planEntries: state.planEntries,
-          isAgentThinking: state.isAgentThinking,
-          agentStatus: state.agentStatus,
-        };
-      }
+    if (!targetSession) {
+      return;
     }
 
-    // 恢复目标会话（只读模式，agent 状态设为 stopped）
-    set({
-      sessions: updatedSessions,
-      activeSessionId: sessionId,
-      activeAgentId: target.agentId,
-      activeWorkDir: target.workDir,
-      messages: target.messages,
-      toolCalls: target.toolCalls,
+    const restoredSession: Session = {
+      ...targetSession,
       pendingPermissions: [],
-      planEntries: target.planEntries,
       isAgentThinking: false,
-      agentStatus: target.agentStatus === 'running' ? 'stopped' : target.agentStatus,
+      agentStatus: normalizeRestorableAgentStatus(targetSession.agentStatus),
+    };
+
+    const nextSessions = sessions.map((session) => {
+      if (session.id !== sessionId) {
+        return session;
+      }
+      return restoredSession;
     });
-    persistSessions(updatedSessions, sessionId);
+
+    set({
+      sessions: nextSessions,
+      activeSessionId: sessionId,
+      ...getSessionStatePatch(restoredSession),
+    });
+    persistSessions(nextSessions, sessionId);
   },
   clearHistory: () => {
-    // 只清除已关闭的历史会话，保留当前活跃的
     const state = get();
-    const activeSessions = state.sessions.filter(
-      (s) => s.id === state.activeSessionId || s.agentStatus === 'running'
-    );
-    set({ sessions: activeSessions });
-    persistSessions(activeSessions, state.activeSessionId);
+    const sessions = syncSessionsWithCurrentState(state).filter((session) => {
+      return session.id === state.activeSessionId
+        || session.agentStatus === 'running'
+        || session.agentStatus === 'starting';
+    });
+
+    set({ sessions });
+    persistSessions(sessions, state.activeSessionId);
   },
 
   // Active working directory
   activeWorkDir: null,
   setActiveWorkDir: (dir) => set({ activeWorkDir: dir }),
+
+  // Active model / latest runtime stats
+  activeModel: null,
+  setActiveModel: (model) => {
+    set({ activeModel: model });
+    saveCurrentAndPersist(get());
+  },
 
   // File browser
   showFileBrowser: false,
@@ -496,12 +602,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       method: 'GET',
       headers: getAuthHeaders(),
     })
-      .then((resp) => resp.json())
+      .then((response) => response.json())
       .then((data) => {
         set({ geminiSessions: data.sessions || [], geminiSessionsLoading: false });
       })
-      .catch((err) => {
-        console.warn('[ChatStore] Failed to fetch Gemini CLI sessions:', err);
+      .catch((error) => {
+        console.warn('[ChatStore] Failed to fetch Gemini CLI sessions:', error);
         set({ geminiSessions: [], geminiSessionsLoading: false });
       });
   },
@@ -509,73 +615,99 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Messages
   messages: [],
   addMessage: (msg) => {
-    set((s) => ({ messages: [...s.messages, msg] }));
-    // 每条消息后触发持久化
+    set((state) => ({ messages: [...state.messages, msg] }));
     saveCurrentAndPersist(get());
   },
   appendToLastAgentMessage: (text) => {
-    set((s) => {
-      const msgs = [...s.messages];
-      const last = msgs[msgs.length - 1];
-      if (last && last.role === 'agent') {
-        msgs[msgs.length - 1] = { ...last, content: last.content + text };
+    set((state) => {
+      const messages = [...state.messages];
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage && lastMessage.role === 'agent') {
+        messages[messages.length - 1] = {
+          ...lastMessage,
+          content: lastMessage.content + text,
+        };
       } else {
-        msgs.push({
+        messages.push({
           id: genMessageId(),
           role: 'agent',
           content: text,
           timestamp: Date.now(),
         });
       }
-      return { messages: msgs };
+      return { messages };
     });
     // agent 流式输出时不频繁保存，依赖 turn_complete 和 status 变化保存
   },
-  clearMessages: () => set({ messages: [], toolCalls: new Map(), pendingPermissions: [], planEntries: [] }),
+  clearMessages: () => {
+    set({
+      messages: [],
+      toolCalls: new Map(),
+      pendingPermissions: [],
+      planEntries: [],
+      lastTurnStats: null,
+    });
+    saveCurrentAndPersist(get());
+  },
 
   // Tool calls
   toolCalls: new Map(),
-  addToolCall: (tc) =>
-    set((s) => {
-      const m = new Map(s.toolCalls);
-      m.set(tc.toolCallId, { ...tc, createdAt: Date.now() });
-      return { toolCalls: m };
-    }),
-  updateToolCall: (toolCallId, status, content) =>
-    set((s) => {
-      const m = new Map(s.toolCalls);
-      const existing = m.get(toolCallId);
-      if (existing) {
-        const updated = { ...existing };
-        if (status) updated.status = status;
-        if (content) updated.content = [...(updated.content || []), ...content];
-        m.set(toolCallId, updated);
+  addToolCall: (toolCall) => {
+    set((state) => {
+      const nextToolCalls = new Map(state.toolCalls);
+      nextToolCalls.set(toolCall.toolCallId, {
+        ...toolCall,
+        createdAt: Date.now(),
+      });
+      return { toolCalls: nextToolCalls };
+    });
+  },
+  updateToolCall: (toolCallId, status, content) => {
+    set((state) => {
+      const nextToolCalls = new Map(state.toolCalls);
+      const existingToolCall = nextToolCalls.get(toolCallId);
+
+      if (!existingToolCall) {
+        return { toolCalls: nextToolCalls };
       }
-      return { toolCalls: m };
-    }),
-  completeAllToolCalls: () =>
-    set((s) => {
-      let changed = false;
-      const m = new Map(s.toolCalls);
-      for (const [key, tc] of m) {
-        if (tc.status === 'pending' || tc.status === 'in_progress') {
-          m.set(key, { ...tc, status: 'completed' });
-          changed = true;
+
+      nextToolCalls.set(toolCallId, {
+        ...existingToolCall,
+        status: status || existingToolCall.status,
+        content: content
+          ? [...(existingToolCall.content || []), ...content]
+          : existingToolCall.content,
+      });
+      return { toolCalls: nextToolCalls };
+    });
+  },
+  completeAllToolCalls: () => {
+    set((state) => {
+      let hasChanges = false;
+      const nextToolCalls = new Map(state.toolCalls);
+
+      for (const [toolCallId, toolCall] of nextToolCalls.entries()) {
+        if (toolCall.status === 'pending' || toolCall.status === 'in_progress') {
+          nextToolCalls.set(toolCallId, {
+            ...toolCall,
+            status: 'completed',
+          });
+          hasChanges = true;
         }
       }
-      return changed ? { toolCalls: m } : {};
-    }),
+
+      return hasChanges ? { toolCalls: nextToolCalls } : {};
+    });
+  },
 
   // Permission requests
   pendingPermissions: [],
-  addPermissionRequest: (req) =>
-    set((s) => ({ pendingPermissions: [...s.pendingPermissions, req] })),
-  removePermissionRequest: (requestId) =>
-    set((s) => ({
-      pendingPermissions: s.pendingPermissions.filter(
-        (p) => p.requestId !== requestId
-      ),
-    })),
+  addPermissionRequest: (req) => set((state) => ({
+    pendingPermissions: [...state.pendingPermissions, req],
+  })),
+  removePermissionRequest: (requestId) => set((state) => ({
+    pendingPermissions: state.pendingPermissions.filter((request) => request.requestId !== requestId),
+  })),
 
   // Plan
   planEntries: [],
@@ -583,25 +715,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // Turn state
   isAgentThinking: false,
-  setIsAgentThinking: (v) => {
-    set({ isAgentThinking: v });
-    if (v) {
-      set({ agentActivity: 'thinking' });
-    } else {
-      set({ agentActivity: 'idle' });
-    }
-    // thinking 结束时触发持久化（agent turn 完成）
-    if (!v) {
+  setIsAgentThinking: (value) => {
+    set({
+      isAgentThinking: value,
+      agentActivity: value ? 'thinking' : 'idle',
+    });
+    if (!value) {
       saveCurrentAndPersist(get());
     }
   },
-  agentActivity: 'idle',
-  setAgentActivity: (activity) => set({ agentActivity: activity }),
   thinkingContent: '',
   appendThinkingContent: (text) => {
-    set((s) => ({ thinkingContent: s.thinkingContent + text }));
+    set((state) => ({ thinkingContent: state.thinkingContent + text }));
   },
   clearThinkingContent: () => set({ thinkingContent: '' }),
+  agentActivity: 'idle',
+  setAgentActivity: (activity) => set({ agentActivity: activity }),
 
   // Error
   lastError: null,
@@ -609,25 +738,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // File changes
   changedFiles: new Map(),
-  addFileChange: (change) =>
-    set((s) => {
-      const m = new Map(s.changedFiles);
-      m.set(change.path, change);
-      return { changedFiles: m };
-    }),
+  addFileChange: (change) => {
+    set((state) => {
+      const nextChangedFiles = new Map(state.changedFiles);
+      nextChangedFiles.set(change.path, change);
+      return { changedFiles: nextChangedFiles };
+    });
+  },
   clearChangedFiles: () => set({ changedFiles: new Map() }),
 
   // ACP 协议日志
   acpLogs: [],
-  addACPLog: (log) =>
-    set((s) => {
-      // 限制最多保留 500 条日志，超出后丢弃最早的
-      const logs = [...s.acpLogs, log];
-      if (logs.length > 500) {
-        return { acpLogs: logs.slice(-500) };
-      }
-      return { acpLogs: logs };
-    }),
+  addACPLog: (log) => {
+    set((state) => {
+      const logs = [...state.acpLogs, log];
+      return {
+        acpLogs: logs.length > 500 ? logs.slice(-500) : logs,
+      };
+    });
+  },
   clearACPLogs: () => set({ acpLogs: [] }),
   showACPLogs: false,
   setShowACPLogs: (show) => set({ showACPLogs: show }),
@@ -635,13 +764,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // 文件系统事件
   lastFSEvent: null,
   fsEventVersion: 0,
-  emitFSEvent: (event) =>
-    set((s) => ({
-      lastFSEvent: event,
-      fsEventVersion: s.fsEventVersion + 1,
-    })),
+  emitFSEvent: (event) => set((state) => ({
+    lastFSEvent: event,
+    fsEventVersion: state.fsEventVersion + 1,
+  })),
 
   // Turn 统计信息
   lastTurnStats: null,
-  setLastTurnStats: (stats) => set({ lastTurnStats: stats }),
+  setLastTurnStats: (stats) => {
+    const nextModel = stats?.model?.trim() || get().activeModel;
+    set({
+      lastTurnStats: stats,
+      activeModel: nextModel || null,
+    });
+    saveCurrentAndPersist(get());
+  },
 }));
