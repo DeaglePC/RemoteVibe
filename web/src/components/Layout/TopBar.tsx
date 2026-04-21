@@ -637,6 +637,20 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
 
         {/* Right: Actions */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          {isRunning && (
+            <button
+              onClick={handleToggleFileBrowser}
+              className="w-8 h-8 rounded-lg flex items-center justify-center active:scale-95 cursor-pointer"
+              style={{
+                background: showFileBrowser ? 'var(--color-surface-3)' : 'transparent',
+                color: showFileBrowser ? 'var(--color-accent-400)' : 'var(--color-text-secondary)',
+                border: 'none',
+              }}
+              title="Open file browser"
+            >
+              <FolderOpen size={16} />
+            </button>
+          )}
           <button
             className="w-8 h-8 rounded-lg flex items-center justify-center active:scale-95 cursor-pointer"
             style={{ background: 'transparent', color: 'var(--color-text-secondary)', border: 'none' }}
