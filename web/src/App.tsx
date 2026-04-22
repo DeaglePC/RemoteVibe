@@ -160,7 +160,7 @@ export default function App() {
         let helpText = '📖 **Available Commands**\n\n';
         helpText += '**App Commands** (handled locally):\n';
         for (const cmd of localCmds) {
-          helpText += `  \`${cmd.name}\` — ${cmd.description}\n`;
+          helpText += `- \`${cmd.name}\` — ${cmd.description}\n`;
         }
 
         if (promptCmds.length > 0) {
@@ -174,7 +174,7 @@ export default function App() {
           for (const [group, cmds] of promptGroups) {
             helpText += `\n*${group}:*\n`;
             for (const cmd of cmds) {
-              helpText += `  \`${cmd.name}\` — ${cmd.description}\n`;
+              helpText += `- \`${cmd.name}\` — ${cmd.description}\n`;
             }
           }
         }
@@ -190,7 +190,7 @@ export default function App() {
           for (const [group, cmds] of infoGroups) {
             helpText += `\n*${group}:*\n`;
             for (const cmd of cmds) {
-              helpText += `  \`${cmd.name}\` — ${cmd.description}\n`;
+              helpText += `- \`${cmd.name}\` — ${cmd.description}\n`;
             }
           }
         }

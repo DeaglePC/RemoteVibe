@@ -19,10 +19,11 @@ interface Props {
   pendingPermissions?: PermissionRequestPayload[];
 }
 
-const EMOJI_REGEX = /^(\p{Emoji_Presentation}|\p{Extended_Pictographic})(\s+)(.*)$/u;
+const EMOJI_REGEX = /^(\p{Emoji_Presentation}|\p{Extended_Pictographic})(\s+)(.*)$/us;
 
 /**
  * 从系统消息内容中提取前置 emoji 图标和剩余文本。
+ * 注意：使用 `s` flag 让 `.` 匹配换行，否则多行系统消息的图标解析会失败。
  */
 function parseSystemContent(content: string): { icon: string | null; text: string } {
   const match = EMOJI_REGEX.exec(content);
@@ -32,12 +33,97 @@ function parseSystemContent(content: string): { icon: string | null; text: strin
   return { icon: null, text: content };
 }
 
+/**
+ * 判断系统消息是否需要"长内容卡片"样式。
+ *
+ * - 含换行（多行）
+ * - 长度 > 80
+ * - 含 Markdown 语法标记（反引号 / 粗体 / 列表项）
+ *
+ * 满足任一条件时，改用多行卡片 + Markdown 渲染；否则保留原有的
+ * 单行 chip 样式（适合 "🧹 Chat history cleared." 这类短提示）。
+ */
+function isRichSystemContent(text: string): boolean {
+  if (text.includes('\n')) return true;
+  if (text.length > 80) return true;
+  if (/[`*]/.test(text)) return true;
+  return false;
+}
+
 export default function MessageBubble({ message, index, toolCalls = [], pendingPermissions = [] }: Props) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
   if (isSystem) {
     const { icon, text } = parseSystemContent(message.content);
+    const isRich = isRichSystemContent(text);
+
+    if (isRich) {
+      // 长/多行/含 Markdown 的系统消息：用卡片 + Markdown 渲染，避免被 ellipsis 截断
+      return (
+        <div
+          className="animate-fade-in-up flex justify-center py-2 px-2"
+          style={{ animationDelay: `${index * 30}ms` }}
+        >
+          <div
+            className="w-full max-w-[92%] sm:max-w-[85%] rounded-lg px-3.5 py-2.5"
+            style={{
+              background: 'var(--color-surface-1)',
+              color: 'var(--color-text-secondary)',
+              border: '1px solid var(--color-border)',
+            }}
+          >
+            <div className="flex items-start gap-2">
+              {icon && (
+                <span
+                  aria-hidden
+                  className="flex-shrink-0 leading-none"
+                  style={{ fontSize: '1rem', marginTop: '0.15rem' }}
+                >
+                  {icon}
+                </span>
+              )}
+              <div className="markdown-body text-[0.8125rem] leading-relaxed flex-1 min-w-0">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || '');
+                      const codeStr = String(children).replace(/\n$/, '');
+                      if (match) {
+                        return (
+                          <SyntaxHighlighter
+                            style={oneDark}
+                            language={match[1]}
+                            PreTag="div"
+                            customStyle={{
+                              margin: '0.5em 0',
+                              borderRadius: '0.5rem',
+                              fontSize: '0.82em',
+                            }}
+                          >
+                            {codeStr}
+                          </SyntaxHighlighter>
+                        );
+                      }
+                      return (
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      );
+                    },
+                  }}
+                >
+                  {text}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 短提示：保留原有的居中 chip 样式
     return (
       <div
         className="animate-fade-in-up flex justify-center py-2"
