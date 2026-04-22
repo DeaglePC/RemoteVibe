@@ -35,7 +35,7 @@ export type MobilePage =
   | { type: 'chat'; sessionId: string }
   | { type: 'files'; rootPath: string }
   | { type: 'file-viewer'; path: string; name: string }
-  | { type: 'settings-detail'; pageId: 'theme' | 'model' | 'backend' | 'about' };
+  | { type: 'settings-detail'; pageId: 'theme' | 'backend' | 'about' };
 
 interface UIState {
   /** Sidebar 当前展示的内容主题 */
@@ -66,7 +66,7 @@ interface UIState {
   setShellFlavor: (flavor: ShellFlavor) => void;
 
   /** 设置页当前展开的子项（Sidebar 设置模式下使用） */
-  activeSettingsPage: 'theme' | 'model' | 'backend' | 'behavior' | 'about' | null;
+  activeSettingsPage: 'theme' | 'backend' | 'behavior' | 'about' | null;
   setActiveSettingsPage: (page: UIState['activeSettingsPage']) => void;
 
   /**

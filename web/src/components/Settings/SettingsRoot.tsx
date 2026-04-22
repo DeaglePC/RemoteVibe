@@ -1,6 +1,5 @@
 import { useUIStore } from '../../stores/uiStore';
 import ThemeSettings from './Pages/ThemeSettings';
-import ModelSettings from './Pages/ModelSettings';
 import BackendManagement from './Pages/BackendManagement';
 import BehaviorSettings from './Pages/BehaviorSettings';
 import AboutPage from './Pages/AboutPage';
@@ -25,7 +24,6 @@ interface EntryDef {
 
 const ENTRIES: EntryDef[] = [
   { id: 'theme', icon: '🎨', title: '主题', summary: 'auto / 浅色 / 深色' },
-  { id: 'model', icon: '🧠', title: '模型', summary: '当前使用的 AI 模型' },
   { id: 'backend', icon: '🖥️', title: '后端机器', summary: '多机器管理' },
   { id: 'behavior', icon: '⚙️', title: '行为', summary: '自动恢复等选项' },
   { id: 'about', icon: 'ℹ️', title: '关于', summary: '版本与仓库' },
@@ -147,7 +145,6 @@ export default function SettingsRoot() {
           </div>
         )}
         {active === 'theme' && <ThemeSettings />}
-        {active === 'model' && <ModelSettings />}
         {active === 'backend' && <BackendManagement />}
         {active === 'behavior' && <BehaviorSettings />}
         {active === 'about' && <AboutPage />}
