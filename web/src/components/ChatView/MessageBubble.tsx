@@ -1,12 +1,22 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import type { ChatMessage } from '../../stores/chatStore';
+import type { ChatMessage, ToolCallState } from '../../stores/chatStore';
+import type { PermissionRequestPayload } from '../../types/protocol';
+import InlineToolCall from './InlineToolCall';
+import CollapsibleThought from './CollapsibleThought';
+import { buildToolActivityItem } from './toolActivityModel';
+import { extractThoughtSegments } from './thoughtExtractor';
 
 interface Props {
   message: ChatMessage;
   index: number;
+  /** 归属于该消息之后的工具调用（仅 Agent 气泡有效） */
+  toolCalls?: ToolCallState[];
+  /** 当前待处理的权限请求，用于给对应工具调用标记 badge */
+  pendingPermissions?: PermissionRequestPayload[];
 }
 
 const EMOJI_REGEX = /^(\p{Emoji_Presentation}|\p{Extended_Pictographic})(\s+)(.*)$/u;
@@ -22,7 +32,7 @@ function parseSystemContent(content: string): { icon: string | null; text: strin
   return { icon: null, text: content };
 }
 
-export default function MessageBubble({ message, index }: Props) {
+export default function MessageBubble({ message, index, toolCalls = [], pendingPermissions = [] }: Props) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
@@ -63,39 +73,18 @@ export default function MessageBubble({ message, index }: Props) {
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
         ) : (
-          <div className="markdown-body text-[0.9375rem] leading-relaxed">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code({ className, children, ...props }) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  const codeStr = String(children).replace(/\n$/, '');
-                  if (match) {
-                    return (
-                      <SyntaxHighlighter
-                        style={oneDark}
-                        language={match[1]}
-                        PreTag="div"
-                        customStyle={{
-                          margin: '0.75em 0',
-                          borderRadius: '0.75rem',
-                          fontSize: '0.82em',
-                        }}
-                      >
-                        {codeStr}
-                      </SyntaxHighlighter>
-                    );
-                  }
-                  return (
-                    <code className={className} {...props}>
-                      {children}
-                    </code>
-                  );
-                },
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
+          <AgentMessageContent content={message.content} />
+        )}
+
+        {/* Agent 气泡下内嵌的工具调用列表（按时间顺序） */}
+        {!isUser && toolCalls.length > 0 && (
+          <div className="mt-1.5 space-y-1">
+            {toolCalls.map((toolCall) => (
+              <InlineToolCall
+                key={toolCall.toolCallId}
+                item={buildToolActivityItem(toolCall, pendingPermissions)}
+              />
+            ))}
           </div>
         )}
 
@@ -106,6 +95,63 @@ export default function MessageBubble({ message, index }: Props) {
           {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * AgentMessageContent 负责把 Agent 的 markdown 正文渲染出来，
+ * 并自动把内容里形如 `[Thought: true]...[Thought: false]...` 的思考段落
+ * 抽取成独立的、默认折叠的 Thought 卡片。
+ */
+function AgentMessageContent({ content }: { content: string }) {
+  const { thoughts, answer } = extractThoughtSegments(content);
+
+  return (
+    <div className="markdown-body text-[0.9375rem] leading-relaxed">
+      {thoughts.map((thought, idx) => (
+        <CollapsibleThought
+          key={`thought-${idx}`}
+          content={thought}
+          index={idx}
+          total={thoughts.length}
+        />
+      ))}
+
+      {answer && (
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkBreaks]}
+          components={{
+            code({ className, children, ...props }) {
+              const match = /language-(\w+)/.exec(className || '');
+              const codeStr = String(children).replace(/\n$/, '');
+              if (match) {
+                return (
+                  <SyntaxHighlighter
+                    style={oneDark}
+                    language={match[1]}
+                    PreTag="div"
+                    customStyle={{
+                      margin: '0.75em 0',
+                      borderRadius: '0.75rem',
+                      fontSize: '0.82em',
+                    }}
+                  >
+                    {codeStr}
+                  </SyntaxHighlighter>
+                );
+              }
+              return (
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              );
+            },
+          }}
+        >
+          {answer}
+        </ReactMarkdown>
+      )}
     </div>
   );
 }

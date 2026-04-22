@@ -13,6 +13,9 @@ interface ChatStatusBarContentProps {
 
 const MONO_LABELS = new Set(['Worktree', 'Model', 'Connection']);
 
+// 仅以下活动标签代表 Agent 正在工作中，手机状态栏会显示 Activity 脉冲徽标
+const BUSY_ACTIVITY_LABELS = new Set(['Thinking', 'Responding', 'Using tools', 'Starting']);
+
 /**
  * ChatStatusBar 在聊天窗口下方展示统一的运行态信息。
  */
@@ -79,29 +82,51 @@ export function ChatStatusBarContent({ viewModel, onReconnectSession }: ChatStat
     const isOnline = viewModel.connection.value.includes('connected');
     const backendName = viewModel.connection.value.includes('local') ? 'Local' : 'Remote';
 
+    // Activity 仅在 Agent 活跃（非 Idle）时展示，用于手机端明确 typing / thinking / tool 状态
+    const activityLabel = viewModel.activity.value;
+    const isBusy = BUSY_ACTIVITY_LABELS.has(activityLabel);
+    const activityTone = getActivityTone(activityLabel);
+
     return (
     <section
       aria-label="Chat runtime status"
-      className="animate-fade-in-up px-4 py-2 flex items-center justify-between"
+      className="animate-fade-in-up px-4 py-2 flex items-center justify-between gap-3"
       style={{
         borderTop: '1px solid var(--color-border)',
         background: 'var(--color-surface-0)',
       }}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         <span
-          className="inline-flex w-2 h-2 rounded-full"
+          className="inline-flex w-2 h-2 rounded-full flex-shrink-0"
           style={{
             background: connectionTone,
             boxShadow: isOnline ? `0 0 6px ${connectionTone}` : 'none',
           }}
         />
-        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
           {isOnline ? '在线' : viewModel.connection.value}
         </span>
+        {isBusy && (
+          <>
+            <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>·</span>
+            <span className="inline-flex items-center gap-1.5 min-w-0">
+              <span
+                className="inline-flex w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse"
+                style={{ background: activityTone }}
+              />
+              <span
+                className="text-xs truncate"
+                style={{ color: activityTone, fontWeight: 500 }}
+              >
+                {activityLabel}
+              </span>
+            </span>
+          </>
+        )}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-shrink-0">
         {viewModel.reconnectAction.visible && (
           <button
             type="button"
@@ -239,4 +264,23 @@ function getConnectionTone(connectionLabel: string): string {
     return 'var(--color-warning)';
   }
   return 'var(--color-text-muted)';
+}
+
+/**
+ * getActivityTone 根据 Agent 当前活动的标签返回对应的视觉主色。
+ * Thinking / Responding / Tool-calling 等状态分别使用不同颜色，
+ * 便于移动端用户一眼判断当前 Agent 的工作阶段。
+ */
+function getActivityTone(activityLabel: string): string {
+  const label = activityLabel.toLowerCase();
+  if (label.includes('think')) {
+    return 'var(--color-brand-400)';
+  }
+  if (label.includes('tool')) {
+    return 'var(--color-warning)';
+  }
+  if (label.includes('respond') || label.includes('stream') || label.includes('typing')) {
+    return 'var(--color-accent-400)';
+  }
+  return 'var(--color-text-secondary)';
 }

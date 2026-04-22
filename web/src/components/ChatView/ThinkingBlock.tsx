@@ -10,8 +10,24 @@ interface Props {
  * 思考中时自动展开并滚动到底部，完成后可折叠。
  */
 export default function ThinkingBlock({ content, isActive }: Props) {
+  // 思考中：展开以便用户实时看到推理；思考结束后自动折叠
   const [isExpanded, setIsExpanded] = useState(true);
+  // 记录是否曾经处于 active 状态 —— 从 active 回到 inactive 的那一刻触发自动折叠
+  const wasActiveRef = useRef(false);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // active → inactive 切换时自动折叠；再次变为 active（新一轮思考）时重新展开
+  useEffect(() => {
+    if (isActive) {
+      wasActiveRef.current = true;
+      setIsExpanded(true);
+      return;
+    }
+    if (wasActiveRef.current) {
+      wasActiveRef.current = false;
+      setIsExpanded(false);
+    }
+  }, [isActive]);
 
   // 思考中时自动滚动到最新内容
   useEffect(() => {

@@ -128,6 +128,12 @@ interface ChatState {
   addMessage: (msg: ChatMessage) => void;
   appendToLastAgentMessage: (text: string) => void;
   clearMessages: () => void;
+  /**
+   * 内部标记：当前 Agent 气泡是否已被"封顶"。
+   * 被工具调用等事件封顶后，下一次 appendToLastAgentMessage 将强制新建气泡，
+   * 从而让工具调用在时间线上正确穿插进 Agent 文字之间，而非堆在最末尾。
+   */
+  agentBubbleClosed: boolean;
 
   // Tool calls
   toolCalls: Map<string, ToolCallState>;
@@ -622,7 +628,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const messages = [...state.messages];
       const lastMessage = messages[messages.length - 1];
-      if (lastMessage && lastMessage.role === 'agent') {
+      // 当气泡未被封顶且最后一条是 agent 时，追加到同一条；否则新开一条气泡。
+      // 这样工具调用发生时会封顶当前气泡，Agent 后续文字会开启新气泡，
+      // 使工具调用在时间线上自然穿插进 Agent 文本之间。
+      const canAppend = !state.agentBubbleClosed && lastMessage && lastMessage.role === 'agent';
+      if (canAppend) {
         messages[messages.length - 1] = {
           ...lastMessage,
           content: lastMessage.content + text,
@@ -635,7 +645,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           timestamp: Date.now(),
         });
       }
-      return { messages };
+      return { messages, agentBubbleClosed: false };
     });
     // agent 流式输出时不频繁保存，依赖 turn_complete 和 status 变化保存
   },
@@ -646,9 +656,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       pendingPermissions: [],
       planEntries: [],
       lastTurnStats: null,
+      agentBubbleClosed: false,
     });
     saveCurrentAndPersist(get());
   },
+  agentBubbleClosed: false,
 
   // Tool calls
   toolCalls: new Map(),
@@ -659,7 +671,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...toolCall,
         createdAt: Date.now(),
       });
-      return { toolCalls: nextToolCalls };
+      // 封顶当前 Agent 气泡：下次 agent 文字到来时会开启新气泡，
+      // 让工具调用在时间线中穿插展示，而非聚集在末尾。
+      return { toolCalls: nextToolCalls, agentBubbleClosed: true };
     });
   },
   updateToolCall: (toolCallId, status, content) => {

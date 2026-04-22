@@ -93,3 +93,24 @@ export function buildToolActivityViewModel(
     items,
   };
 }
+
+/**
+ * buildToolActivityItem 根据单个 ToolCallState 与待处理权限列表，构建用于内联展示的视图模型。
+ * 供嵌入在消息气泡中的工具卡片复用与独立面板一致的装配逻辑。
+ */
+export function buildToolActivityItem(
+  toolCall: ToolCallState,
+  pendingPermissions: PermissionRequestPayload[],
+): ToolActivityItem {
+  const pendingPermissionCount = pendingPermissions.reduce((count, request) => {
+    return request.toolCallId === toolCall.toolCallId ? count + 1 : count;
+  }, 0);
+
+  return {
+    ...toolCall,
+    pendingPermissionCount,
+    hasDiff: !!toolCall.content?.some((item) => item.type === 'diff'),
+    hasTerminal: !!toolCall.content?.some((item) => item.type === 'terminal'),
+    hasText: !!toolCall.content?.some((item) => item.type === 'text' && item.text),
+  };
+}
