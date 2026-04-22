@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FolderOpen, LoaderCircle, Menu, Play, Square, X } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { useBackendStore, getApiBaseUrl, getAuthHeaders } from '../../stores/backendStore';
@@ -50,11 +50,25 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
     setShowMobileMenu(false);
   };
 
-  // 当 launchTrigger 变化时（从 ActivityBar 触发），自动打开 workspace picker
+  /*
+   * launchTrigger 是「递增触发器」：每次 App 层想触发 Launch 弹窗就把它 +1。
+   * 但由于 shell 切换（如 isMobile 跨断点、classic <-> pwa 切换）会导致
+   * TopBar 重新挂载，此时 useEffect 首次运行会把一个 「历史残留值」
+   * 误当成「新触发」处理，导致窗口变大/变小时弹窗自己跳出来。
+   * 用 ref 记住「上次已消费过的值」，只有真正发生递增时才响应。
+   */
+  const lastHandledLaunchTriggerRef = useRef<number | undefined>(launchTrigger);
   useEffect(() => {
+    // 无值或非正数：仅更新基准，不触发
     if (!(launchTrigger && launchTrigger > 0)) {
+      lastHandledLaunchTriggerRef.current = launchTrigger;
       return undefined;
     }
+    // 和上次已消费值相同（挂载时的初始值 或 重复值），不触发
+    if (lastHandledLaunchTriggerRef.current === launchTrigger) {
+      return undefined;
+    }
+    lastHandledLaunchTriggerRef.current = launchTrigger;
 
     const frameId = window.requestAnimationFrame(() => {
       setShowWorkspacePicker(true);

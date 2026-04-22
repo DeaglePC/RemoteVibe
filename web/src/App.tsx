@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useChatStore, genMessageId } from './stores/chatStore';
 import { useBackendStore, pingAllBackends } from './stores/backendStore';
-import { SLASH_COMMANDS } from './types/protocol';
+import { getSlashCommands, inferAgentKind } from './types/protocol';
 import TopBar from './components/Layout/TopBar';
 import ActivityBar from './components/Layout/ActivityBar';
 import ChatView from './components/ChatView/ChatView';
@@ -115,47 +115,35 @@ export default function App() {
 
   const handleSlashCommand = useCallback((commandId: string) => {
     const store = useChatStore.getState();
-    const cmdDef = SLASH_COMMANDS.find((c) => c.id === commandId);
+    const kind = inferAgentKind(activeAgentId);
+    const availableCommands = getSlashCommands(kind);
+    const cmdDef = availableCommands.find((c) => c.id === commandId);
 
     if (cmdDef?.scope === 'agent') {
-      if (cmdDef.webAction === 'prompt') {
-        // 通过自然语言 prompt 发送给 Gemini CLI 实现近似效果
-        if (agentStatus !== 'running') {
-          store.addMessage({
-            id: genMessageId(),
-            role: 'system',
-            content: `⚠️ Agent is not running. Start an agent first to use \`${cmdDef.name}\`.`,
-            timestamp: Date.now(),
-          });
-          return;
-        }
-        // 先显示用户执行了哪个命令
+      // agent 命令统一走 prompt 透传（info 型已在瘦身时全部移除）
+      if (agentStatus !== 'running') {
         store.addMessage({
           id: genMessageId(),
           role: 'system',
-          content: `${cmdDef.icon} Executing \`${cmdDef.name}\` — sending equivalent prompt to agent...`,
+          content: `⚠️ Agent is not running. Start an agent first to use \`${cmdDef.name}\`.`,
           timestamp: Date.now(),
         });
-        handleSendPrompt(cmdDef.webPrompt || cmdDef.description);
-      } else {
-        // webAction === 'info' 或未设置：显示提示信息
-        const info = cmdDef.webInfo
-          || `\`${cmdDef.name}\` is a Gemini CLI terminal command and is not available in Web mode.\n\n💡 Tip: Run \`gemini ${cmdDef.name}\` in your terminal to use this feature.`;
-        store.addMessage({
-          id: genMessageId(),
-          role: 'system',
-          content: `${cmdDef.icon} ${info}`,
-          timestamp: Date.now(),
-        });
+        return;
       }
+      store.addMessage({
+        id: genMessageId(),
+        role: 'system',
+        content: `${cmdDef.icon} Executing \`${cmdDef.name}\` — sending equivalent prompt to agent...`,
+        timestamp: Date.now(),
+      });
+      handleSendPrompt(cmdDef.webPrompt || cmdDef.description);
       return;
     }
 
     switch (commandId) {
       case 'help': {
-        const localCmds = SLASH_COMMANDS.filter((c) => c.scope === 'local');
-        const promptCmds = SLASH_COMMANDS.filter((c) => c.scope === 'agent' && c.webAction === 'prompt');
-        const infoCmds = SLASH_COMMANDS.filter((c) => c.scope === 'agent' && c.webAction !== 'prompt');
+        const localCmds = availableCommands.filter((c) => c.scope === 'local');
+        const agentCmds = availableCommands.filter((c) => c.scope === 'agent');
 
         let helpText = '📖 **Available Commands**\n\n';
         helpText += '**App Commands** (handled locally):\n';
@@ -163,36 +151,23 @@ export default function App() {
           helpText += `- \`${cmd.name}\` — ${cmd.description}\n`;
         }
 
-        if (promptCmds.length > 0) {
-          helpText += '\n**Gemini CLI Commands** (available via prompt):\n';
-          const promptGroups = new Map<string, typeof promptCmds>();
-          for (const cmd of promptCmds) {
-            const group = promptGroups.get(cmd.group) || [];
+        if (agentCmds.length > 0) {
+          const agentLabel = kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : 'Agent';
+          helpText += `\n**${agentLabel} Agent Commands** (sent as prompt to agent):\n`;
+          const agentGroups = new Map<string, typeof agentCmds>();
+          for (const cmd of agentCmds) {
+            const group = agentGroups.get(cmd.group) || [];
             group.push(cmd);
-            promptGroups.set(cmd.group, group);
+            agentGroups.set(cmd.group, group);
           }
-          for (const [group, cmds] of promptGroups) {
+          for (const [group, cmds] of agentGroups) {
             helpText += `\n*${group}:*\n`;
             for (const cmd of cmds) {
               helpText += `- \`${cmd.name}\` — ${cmd.description}\n`;
             }
           }
-        }
-
-        if (infoCmds.length > 0) {
-          helpText += '\n**Gemini CLI Commands** (terminal only, info in Web mode):\n';
-          const infoGroups = new Map<string, typeof infoCmds>();
-          for (const cmd of infoCmds) {
-            const group = infoGroups.get(cmd.group) || [];
-            group.push(cmd);
-            infoGroups.set(cmd.group, group);
-          }
-          for (const [group, cmds] of infoGroups) {
-            helpText += `\n*${group}:*\n`;
-            for (const cmd of cmds) {
-              helpText += `- \`${cmd.name}\` — ${cmd.description}\n`;
-            }
-          }
+        } else {
+          helpText += '\n_Start an agent to see agent-specific commands._\n';
         }
 
         store.addMessage({ id: genMessageId(), role: 'system', content: helpText, timestamp: Date.now() });
@@ -444,6 +419,7 @@ export default function App() {
           onPermissionRespond={handlePermissionRespond}
           onSendWS={send}
           launchTrigger={showLaunchTrigger}
+          onLaunch={handleLaunch}
         />
       ) : (
         /* 桌面端：classic 老布局（?shell=classic 或 localStorage 切换后可用） */

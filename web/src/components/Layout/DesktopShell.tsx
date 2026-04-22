@@ -33,6 +33,12 @@ interface Props {
   onSendWS: (msg: { type: string; payload: unknown }) => void;
   /** 外部控制的 TopBar launchTrigger（来自 App），数字递增即触发 Launch 弹窗 */
   launchTrigger: number;
+  /**
+   * 触发「新建会话 / 打开工作区」弹窗的回调。
+   * 由 App 层透传，调用后会递增 launchTrigger，由 TopBar 响应弹出 WorkspacePicker。
+   * Sidebar 里的 ProjectAccordion 顶部 ＋ 按钮以及项目下的「＋ 新建会话」都最终触发此回调。
+   */
+  onLaunch: () => void;
 }
 
 /**
@@ -60,6 +66,7 @@ export default function DesktopShell({
   onPermissionRespond,
   onSendWS,
   launchTrigger,
+  onLaunch,
 }: Props) {
   const isThinking = useChatStore((s) => s.isAgentThinking);
   const agentStatus = useChatStore((s) => s.agentStatus);
@@ -97,7 +104,7 @@ export default function DesktopShell({
       {/* 主体：ActivityBar + Sidebar + (Main | RightPane) */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <SlimActivityBar />
-        <DesktopSidebar onNewSession={() => { /* 由 SlimActivityBar + ProjectAccordion 触发，此处占位 */ }} />
+        <DesktopSidebar onNewSession={() => onLaunch()} />
 
         {/* 主区 + 右侧 Pane：用 Allotment 可拖分割 */}
         <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>

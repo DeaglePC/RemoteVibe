@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useChatStore } from '../../stores/chatStore';
-import { SLASH_COMMANDS } from '../../types/protocol';
+import { getSlashCommands, inferAgentKind } from '../../types/protocol';
 import type { SlashCommand } from '../../types/protocol';
 
 interface Props {
@@ -21,17 +21,24 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const commandListRef = useRef<HTMLDivElement>(null);
 
+  // 根据当前激活 agent 推断 kind，缩小命令范围
+  const activeAgentId = useChatStore((s) => s.activeAgentId);
+  const availableCommands = useMemo(
+    () => getSlashCommands(inferAgentKind(activeAgentId)),
+    [activeAgentId],
+  );
+
   const filteredCommands = useMemo(() => {
     if (!text.startsWith('/')) {
       return [];
     }
 
     const query = text.slice(1).toLowerCase();
-    return SLASH_COMMANDS.filter((command) => {
+    return availableCommands.filter((command) => {
       return command.name.toLowerCase().includes(query)
         || command.description.toLowerCase().includes(query);
     });
-  }, [text]);
+  }, [text, availableCommands]);
 
   const showCommands = filteredCommands.length > 0;
   const activeCommandIdx = showCommands
@@ -67,7 +74,7 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
       return;
     }
 
-    const exactCommand = SLASH_COMMANDS.find((command) => command.name === trimmedText);
+    const exactCommand = availableCommands.find((command) => command.name === trimmedText);
     if (exactCommand) {
       onSlashCommand(exactCommand.id);
       resetComposer();
@@ -76,7 +83,7 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
 
     onSend(trimmedText);
     resetComposer();
-  }, [activeCommandIdx, disabled, filteredCommands, onSend, onSlashCommand, resetComposer, showCommands, text]);
+  }, [activeCommandIdx, availableCommands, disabled, filteredCommands, onSend, onSlashCommand, resetComposer, showCommands, text]);
 
   const selectCommand = useCallback((command: SlashCommand) => {
     onSlashCommand(command.id);
@@ -215,18 +222,6 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
                             PROMPT
                           </span>
                         )}
-                        {command.scope === 'agent' && command.webAction !== 'prompt' && (
-                          <span
-                            className="text-xs px-1 rounded"
-                            style={{
-                              background: 'var(--color-surface-3)',
-                              color: 'var(--color-text-muted)',
-                              fontSize: '0.55rem',
-                            }}
-                          >
-                            CLI
-                          </span>
-                        )}
                       </div>
                       <div className="text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>
                         {command.description}
@@ -305,7 +300,7 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
               disabled={disabled}
               onClick={() => {
                 if (disabled) return;
-                // 以 "/" 触发命令面板（复用现有 SLASH_COMMANDS 下拉）
+                // 以 "/" 触发命令面板（复用现有按 kind 过滤的命令下拉）
                 setText('/');
                 // 下一帧聚焦到 textarea 末尾，方便继续输入
                 requestAnimationFrame(() => {
