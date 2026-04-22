@@ -87,20 +87,3 @@ export function extractThoughtSegments(content: string): ExtractedThoughts {
     answer: answerParts.join('\n\n'),
   };
 }
-
-/** 把一个 raw 段落根据当前模式写入对应的容器 */
-function pushSegment(
-  raw: string,
-  mode: 'thought' | 'answer',
-  thoughts: string[],
-  answerParts: string[],
-): void {
-  if (!raw) {
-    return;
-  }
-  if (mode === 'thought') {
-    thoughts.push(raw);
-  } else {
-    answerParts.push(raw);
-  }
-}

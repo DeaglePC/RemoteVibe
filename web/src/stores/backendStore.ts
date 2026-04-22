@@ -10,11 +10,23 @@ export interface BackendConfig {
   apiKey: string;  // 认证 API Key
 }
 
+/** 单台后端的在线状态（P5：多机器管理优化） */
+export type BackendHealthState = 'unknown' | 'checking' | 'online' | 'offline';
+
+export interface BackendHealth {
+  state: BackendHealthState;
+  latencyMs?: number;
+  lastCheckedAt?: number;
+  message?: string;
+}
+
 interface BackendState {
   /** 所有已配置的后端列表 */
   backends: BackendConfig[];
   /** 当前选中的后端 ID */
   activeBackendId: string | null;
+  /** 每台机器的在线状态（内存态，不持久化） */
+  statusMap: Record<string, BackendHealth>;
 
   /** 获取当前活跃后端 */
   getActiveBackend: () => BackendConfig | null;
@@ -27,6 +39,9 @@ interface BackendState {
   removeBackend: (id: string) => void;
   /** 切换当前后端 */
   setActiveBackend: (id: string) => void;
+
+  /** 更新某台机器的健康状态（由 pingBackend 调用） */
+  setBackendStatus: (id: string, status: BackendHealth) => void;
 
   /** 显示设置弹窗 */
   showSettings: boolean;
@@ -95,6 +110,7 @@ const { backends: initialBackends, activeBackendId: initialActiveId } = loadBack
 export const useBackendStore = create<BackendState>((set, get) => ({
   backends: initialBackends,
   activeBackendId: initialActiveId,
+  statusMap: {},
   showSettings: false,
 
   getActiveBackend: () => {
@@ -128,13 +144,20 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     if (activeBackendId === id) {
       activeBackendId = backends[0]?.id || null;
     }
-    set({ backends, activeBackendId });
+    // 清理该机器的状态，避免 statusMap 长期残留
+    const statusMap = { ...state.statusMap };
+    delete statusMap[id];
+    set({ backends, activeBackendId, statusMap });
     persistBackends(backends, activeBackendId);
   },
 
   setActiveBackend: (id) => {
     set({ activeBackendId: id });
     persistBackends(get().backends, id);
+  },
+
+  setBackendStatus: (id, status) => {
+    set((state) => ({ statusMap: { ...state.statusMap, [id]: status } }));
   },
 
   setShowSettings: (show) => set({ showSettings: show }),
@@ -196,4 +219,67 @@ export function getWsUrl(): string {
   const host = window.location.host;
   const token = localStorage.getItem('bmh_token') || '';
   return `${protocol}//${host}/ws${token ? `?token=${token}` : ''}`;
+}
+
+// ==================== Health Ping ====================
+
+/**
+ * 对指定后端发起一次健康检测（/api/health）。
+ * 会同步更新 store 中的 statusMap：先置 checking，再置 online/offline。
+ * 成功返回 true，失败返回 false；不抛异常。
+ */
+export async function pingBackend(id: string, timeoutMs = 5000): Promise<boolean> {
+  const store = useBackendStore.getState();
+  const backend = store.backends.find((b) => b.id === id);
+  if (!backend) return false;
+
+  store.setBackendStatus(id, { state: 'checking', lastCheckedAt: Date.now() });
+
+  const trimmedUrl = backend.apiUrl.replace(/\/+$/, '');
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  if (backend.apiKey) {
+    headers['Authorization'] = `Bearer ${backend.apiKey}`;
+  }
+
+  const startedAt = Date.now();
+  try {
+    const resp = await fetch(`${trimmedUrl}/api/health`, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const latencyMs = Date.now() - startedAt;
+    if (resp.ok) {
+      useBackendStore.getState().setBackendStatus(id, {
+        state: 'online',
+        latencyMs,
+        lastCheckedAt: Date.now(),
+      });
+      return true;
+    }
+    useBackendStore.getState().setBackendStatus(id, {
+      state: 'offline',
+      latencyMs,
+      lastCheckedAt: Date.now(),
+      message: `HTTP ${resp.status}`,
+    });
+    return false;
+  } catch (err) {
+    useBackendStore.getState().setBackendStatus(id, {
+      state: 'offline',
+      latencyMs: Date.now() - startedAt,
+      lastCheckedAt: Date.now(),
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
+/**
+ * 对所有已配置后端并发发起健康检测，结果通过 statusMap 回灌 UI。
+ * 常见触发时机：App 启动后、设置页打开、手动点击"刷新"。
+ */
+export async function pingAllBackends(timeoutMs = 5000): Promise<void> {
+  const { backends } = useBackendStore.getState();
+  await Promise.all(backends.map((b) => pingBackend(b.id, timeoutMs)));
 }

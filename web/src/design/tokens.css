@@ -1,0 +1,81 @@
+/* ==================== Design Tokens ====================
+ *
+ * 设计 token 集中定义。这里只放 Tailwind v4 `@theme` 块之外的 token，
+ * 即 Tailwind 不识别的非颜色/字体/圆角类 token。
+ * 颜色、字体、圆角等与 Tailwind 原子类相关的 token 仍在 `index.css` 的 `@theme` 里。
+ *
+ * 使用方式：在组件 CSS 或 inline style 中通过 `var(--space-4)` 引用。
+ * 切勿把这些变量声明进 `@theme` 块，否则 Tailwind v4 会尝试把它们
+ * 解释成原子类 scale。
+ */
+
+:root {
+  /* ==================== Spacing Scale ====================
+   * 以 4px 为基准的梯度，覆盖常用间距。
+   * 和 Tailwind 默认 spacing 不冲突（Tailwind 仍用自己的 `p-*`/`m-*` 类），
+   * 这些变量只用于 inline style 或未来 design 层组件的一致性。
+   */
+  --space-0: 0;
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+
+  /* ==================== Elevation（阴影层级） ====================
+   * 从 1 到 4，层级越高阴影越重。用于浮层、卡片、模态等。
+   * 颜色使用 oklch 以便浅色/深色主题都保持柔和。
+   */
+  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.2);
+  --shadow-2: 0 2px 8px oklch(0 0 0 / 0.25);
+  --shadow-3: 0 8px 24px oklch(0 0 0 / 0.3);
+  --shadow-4: 0 16px 48px oklch(0 0 0 / 0.35);
+
+  /* ==================== Motion（动画时长与缓动） ====================
+   * 统一动画节奏，避免各处时长不一致。
+   */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);       /* 弹性收尾，iOS 风 */
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-linear: linear;
+
+  /* ==================== Z-Index 层级 ====================
+   * 全局 z-index 体系，避免魔数堆叠。
+   *  - base:    普通文档流
+   *  - raised:  悬浮卡片、tooltip、dropdown
+   *  - overlay: 右侧 Pane、底部 sheet 等半遮罩层
+   *  - modal:   模态对话框
+   *  - toast:   顶部 toast、snackbar
+   */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-overlay: 100;
+  --z-modal: 1000;
+  --z-toast: 2000;
+
+  /* ==================== Touch Target ====================
+   * iOS HIG 推荐最小可点区域 44x44，Material 推荐 48x48。
+   * 我们取 44 作为基线，手机端所有可点元素最小高度不低于此值。
+   */
+  --touch-target: 44px;
+
+  /* ==================== Layout（布局常量） ====================
+   * 手机端 / 桌面端的关键布局尺寸，集中在此便于调整。
+   */
+  --layout-activity-bar: 48px;        /* PC 端左侧 ActivityBar 宽度 */
+  --layout-sidebar: 220px;            /* PC 端常驻 Sidebar 宽度 */
+  --layout-right-pane: 380px;         /* PC 端右侧 Pane 宽度 */
+  --layout-page-header: 44px;         /* 主区/手机 PageHeader 高度 */
+  --layout-status-bar: 24px;          /* 底部 ChatStatusBar 高度 */
+  --layout-mobile-tabbar: 56px;       /* 手机端底部 TabBar 高度 */
+  --layout-mobile-input: 56px;        /* 手机端 InputBar 高度 */
+}

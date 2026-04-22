@@ -1,18 +1,29 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useChatStore, genMessageId } from './stores/chatStore';
-import { useBackendStore } from './stores/backendStore';
+import { useBackendStore, pingAllBackends } from './stores/backendStore';
 import { SLASH_COMMANDS } from './types/protocol';
 import TopBar from './components/Layout/TopBar';
 import ActivityBar from './components/Layout/ActivityBar';
 import ChatView from './components/ChatView/ChatView';
-import ChatStatusBar from './components/ChatView/ChatStatusBar';
+import ChatRuntimeStrip from './components/ChatView/ChatRuntimeStrip';
 import InputBar from './components/ChatView/InputBar';
 import FileTreeBrowser from './components/FileBrowser/FileTreeBrowser';
 import FileViewer from './components/FileBrowser/FileViewer';
-import ACPLogPanel from './components/Debug/ACPLogPanel';
+import SimpleToast from './components/Toast/SimpleToast';
+import DesktopShell from './components/Layout/DesktopShell';
+import MobileShell from './components/Layout/MobileShell';
+import { useBuiltinCommands } from './components/CommandPalette/useBuiltinCommands';
+import { useShortcuts } from './hooks/useShortcuts';
+import { useUIStore } from './stores/uiStore';
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
+
+// 懒加载：ACPLogPanel 只在 /log 命令开启时才显示；
+// CommandPalette 仅 Cmd+K 打开时才渲染
+// 两个组件拆出后减小首屏 bundle 体积
+const ACPLogPanel = lazy(() => import('./components/Debug/ACPLogPanel'));
+const CommandPalette = lazy(() => import('./components/CommandPalette/CommandPalette'));
 
 export default function App() {
   const { send } = useWebSocket();
@@ -30,6 +41,8 @@ export default function App() {
   // 启动时加载历史会话
   useEffect(() => {
     useChatStore.getState().loadHistorySessions();
+    // P5 多机器管理：启动时探测所有后端的在线状态
+    void pingAllBackends();
   }, []);
 
   const handleStartAgent = useCallback((agentId: string, workDir: string, opts?: { geminiSessionId?: string; model?: string }) => {
@@ -317,19 +330,73 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // ===== P3：新 shell（pwa）相关 =====
+  const shellFlavor = useUIStore((s) => s.shellFlavor);
+  const commandPaletteOpen = useUIStore((s) => s.commandPaletteOpen);
+  const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
+
+  // 构建命令面板命令集：新建会话转发给 handleLaunch；停止 Agent 转发给 handleStop
+  const commands = useBuiltinCommands({
+    onNewSession: handleLaunch,
+    onStopAgent: handleStop,
+  });
+
+  // 全局快捷键：Cmd+K 打开命令面板；Cmd+B 折 Sidebar；Cmd+J 切 Right Pane；Cmd+, 设置；Cmd+N 新建
+  useShortcuts([
+    { key: 'k', mod: true, handler: () => { setCommandPaletteOpen(true); } },
+    { key: 'b', mod: true, handler: () => { useUIStore.getState().toggleSidebarCollapsed(); } },
+    { key: 'j', mod: true, handler: () => {
+        const st = useUIStore.getState();
+        st.setRightPaneContent('files');
+        st.toggleRightPaneOpen();
+      } },
+    { key: ',', mod: true, handler: () => {
+        const st = useUIStore.getState();
+        st.setSidebarMode('settings');
+        if (st.sidebarCollapsed) st.setSidebarCollapsed(false);
+      } },
+    { key: 'n', mod: true, handler: () => { handleLaunch(); } },
+    { key: 'Escape', handler: () => {
+        if (useUIStore.getState().commandPaletteOpen) {
+          setCommandPaletteOpen(false);
+        } else {
+          return false; // 不消费，让其他组件处理（如 Modal 关闭）
+        }
+      } },
+  ]);
+
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--color-surface-0)' }}>
-      {/* TopBar: 移动端显示完整 header，桌面端只保留弹窗逻辑 */}
-      <TopBar
-        onStartAgent={handleStartAgent}
-        onStopAgent={handleStopAgent}
-        launchTrigger={isMobile ? undefined : showLaunchTrigger}
-        hideHeader={!isMobile}
-      />
+      {/* TopBar: 
+          - classic 壳：手机端显示完整 header，桌面端仅保留弹窗逻辑
+          - pwa 壳：DesktopShell / MobileShell 内部自己引入 TopBar（hideHeader=true），这里跳过
+      */}
+      {shellFlavor === 'classic' && (
+        <TopBar
+          onStartAgent={handleStartAgent}
+          onStopAgent={handleStopAgent}
+          launchTrigger={isMobile ? undefined : showLaunchTrigger}
+          hideHeader={!isMobile}
+        />
+      )}
 
       {/* ===== 主内容区 ===== */}
-      {isMobile ? (
-        /* 移动端：全屏覆盖模式 */
+      {isMobile && shellFlavor === 'pwa' ? (
+        /* 手机端：P4 新 PWA 壳 */
+        <MobileShell
+          onStartAgent={handleStartAgent}
+          onStopAgent={handleStopAgent}
+          onSendPrompt={handleSendPrompt}
+          onSlashCommand={handleSlashCommand}
+          onCancel={handleCancel}
+          onReconnectSession={handleReconnectSession}
+          onPermissionRespond={handlePermissionRespond}
+          onSendWS={send}
+          launchTrigger={showLaunchTrigger}
+          onLaunch={handleLaunch}
+        />
+      ) : isMobile ? (
+        /* 移动端：classic 老布局（全屏覆盖模式） */
         <div className="flex flex-1 overflow-hidden relative">
           {fileBrowserVisible && !viewingFile && (
             <div className="mobile-panel animate-slide-up" style={{ background: 'var(--color-surface-0)' }}>
@@ -353,6 +420,7 @@ export default function App() {
           )}
           {!fileBrowserVisible && !viewingFile && (
             <div className="flex flex-col flex-1 min-w-0">
+              <ChatRuntimeStrip onReconnectSession={handleReconnectSession} />
               <ChatView onPermissionRespond={handlePermissionRespond} />
               <InputBar
                 onSend={handleSendPrompt}
@@ -361,12 +429,24 @@ export default function App() {
                 isThinking={isThinking}
                 onCancel={handleCancel}
               />
-              <ChatStatusBar onReconnectSession={handleReconnectSession} />
             </div>
           )}
         </div>
+      ) : shellFlavor === 'pwa' ? (
+        /* 桌面端：P3 新 PWA 壳 */
+        <DesktopShell
+          onStartAgent={handleStartAgent}
+          onStopAgent={handleStopAgent}
+          onSendPrompt={handleSendPrompt}
+          onSlashCommand={handleSlashCommand}
+          onCancel={handleCancel}
+          onReconnectSession={handleReconnectSession}
+          onPermissionRespond={handlePermissionRespond}
+          onSendWS={send}
+          launchTrigger={showLaunchTrigger}
+        />
       ) : (
-        /* 桌面端：VSCode 风格布局 */
+        /* 桌面端：classic 老布局（?shell=classic 或 localStorage 切换后可用） */
         <div className="flex flex-1 overflow-hidden">
           {/* Activity Bar (最左侧) */}
           <ActivityBar
@@ -415,6 +495,7 @@ export default function App() {
                   {/* 聊天 + 输入框 */}
                   <Allotment.Pane minSize={200}>
                     <div className="flex flex-col h-full min-w-0">
+                      <ChatRuntimeStrip onReconnectSession={handleReconnectSession} />
                       <ChatView onPermissionRespond={handlePermissionRespond} />
                       <InputBar
                         onSend={handleSendPrompt}
@@ -423,14 +504,15 @@ export default function App() {
                         isThinking={isThinking}
                         onCancel={handleCancel}
                       />
-                      <ChatStatusBar onReconnectSession={handleReconnectSession} />
                     </div>
                   </Allotment.Pane>
 
                   {/* ACP 协议日志面板 (底部) */}
                   {showACPLogs && (
                     <Allotment.Pane minSize={120} preferredSize={250} maxSize={500}>
-                      <ACPLogPanel />
+                      <Suspense fallback={null}>
+                        <ACPLogPanel />
+                      </Suspense>
                     </Allotment.Pane>
                   )}
                 </Allotment>
@@ -438,6 +520,20 @@ export default function App() {
             </Allotment>
           </div>
         </div>
+      )}
+
+      {/* PWA 提示：新版本可更新 / 可安装到主屏幕（P2 临时 Toast，P3 会替换） */}
+      <SimpleToast />
+
+      {/* 命令面板 (Cmd+K) — P3 新增；懒加载，仅打开时渲染 */}
+      {commandPaletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            open={commandPaletteOpen}
+            onClose={() => setCommandPaletteOpen(false)}
+            commands={commands}
+          />
+        </Suspense>
       )}
     </div>
   );

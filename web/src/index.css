@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* 本地字体（Inter + JetBrains Mono）；脚本生成：npm run fetch:fonts */
+@import "./styles/fonts.generated.css";
+
+/* 设计 token：Tailwind @theme 外的非颜色 token（spacing/elevation/motion 等） */
+@import "./design/tokens.css";
+
+/* 主题变量：dark（默认）/ light / auto（跟随系统） */
+@import "./design/themes.css";
+
 /* ==================== Design System ==================== */
 
 @theme {
@@ -134,6 +143,17 @@ body {
   }
 }
 
+@keyframes slideOutRight {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
 @keyframes slideInLeft {
   from {
     opacity: 0;
@@ -169,6 +189,10 @@ body {
 
 .animate-slide-in-right {
   animation: slideInRight 0.3s ease-out both;
+}
+
+.animate-slide-out-right {
+  animation: slideOutRight 0.2s ease-in both;
 }
 
 .animate-slide-in-left {

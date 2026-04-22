@@ -240,35 +240,23 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
         </div>
       )}
 
+      {/*
+        新布局（2026-04-22）：单个大圆角容器纵向排列
+         ┌─────────────────────────────┐
+         │ [textarea]                  │
+         │                             │
+         │ 📎 ⚙️ ⏹           ⬆ (send) │
+         └─────────────────────────────┘
+        - textarea 占满顶部
+        - 底部工具条：左排小图标、右单个圆形发送按钮
+      */}
       <div
-        className="flex items-end gap-2 rounded-2xl px-3 py-2.5 transition-all duration-200"
+        className="flex flex-col gap-2 rounded-3xl px-3 pt-3 pb-2 transition-all duration-200"
         style={{
           background: 'var(--color-surface-1)',
           border: `1px solid ${showCommands ? 'var(--color-accent-500)' : 'var(--color-border)'}`,
         }}
       >
-        {/* 左侧工具按钮 */}
-        <div className="flex items-center gap-0.5 pb-1 shrink-0">
-          <button
-            className="p-2 rounded-xl transition-all duration-150 hover:scale-110 active:scale-95 cursor-pointer"
-            style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
-            title="Attach file"
-            onClick={() => {
-              const store = useChatStore.getState();
-              store.addMessage({
-                id: `msg_${Date.now()}`,
-                role: 'system',
-                content: '📎 File upload will be available soon.',
-                timestamp: Date.now(),
-              });
-            }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
-        </div>
-
         <textarea
           ref={textareaRef}
           value={text}
@@ -277,7 +265,7 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
           placeholder={disabled ? 'Start an agent first...' : '输入消息...'}
           disabled={disabled}
           rows={1}
-          className="flex-1 resize-none outline-none text-[0.9375rem] min-h-[24px] disabled:opacity-40 py-1.5"
+          className="w-full resize-none outline-none text-[0.9375rem] min-h-[24px] disabled:opacity-40 px-1"
           style={{
             background: 'transparent',
             color: 'var(--color-text-primary)',
@@ -286,41 +274,89 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
           }}
         />
 
-        <div className="flex items-center gap-1 pb-1 shrink-0">
-          {isThinking && onCancel && (
+        {/* 底部工具条 */}
+        <div className="flex items-center justify-between">
+          {/* 左：📎 附件 / ⚙️ 斜杠命令 / ⏹ 取消 */}
+          <div className="flex items-center gap-0.5">
             <button
-              onClick={onCancel}
-              className="p-2 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
-              style={{
-                background: 'var(--color-danger)',
-                color: 'white',
-                border: 'none',
+              className="p-1.5 rounded-lg transition-all duration-150 hover:bg-[color:var(--color-surface-2)] active:scale-95 cursor-pointer"
+              style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
+              title="Attach file"
+              onClick={() => {
+                const store = useChatStore.getState();
+                store.addMessage({
+                  id: `msg_${Date.now()}`,
+                  role: 'system',
+                  content: '📎 File upload will be available soon.',
+                  timestamp: Date.now(),
+                });
               }}
-              title="Cancel"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
-          )}
 
+            <button
+              type="button"
+              className="p-1.5 rounded-lg transition-all duration-150 hover:bg-[color:var(--color-surface-2)] active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
+              title="斜杠命令"
+              disabled={disabled}
+              onClick={() => {
+                if (disabled) return;
+                // 以 "/" 触发命令面板（复用现有 SLASH_COMMANDS 下拉）
+                setText('/');
+                // 下一帧聚焦到 textarea 末尾，方便继续输入
+                requestAnimationFrame(() => {
+                  const ta = textareaRef.current;
+                  if (ta) {
+                    ta.focus();
+                    ta.setSelectionRange(1, 1);
+                  }
+                });
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+
+            {isThinking && onCancel && (
+              <button
+                onClick={onCancel}
+                className="p-1.5 rounded-lg transition-all duration-150 hover:bg-[color:var(--color-surface-2)] active:scale-95 cursor-pointer"
+                style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
+                title="停止生成"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* 右：圆形发送按钮 */}
           <button
             onClick={handleSubmit}
             disabled={!text.trim() || disabled}
-            className="p-2 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            className="w-9 h-9 flex items-center justify-center rounded-full transition-all duration-200 hover:scale-105 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             style={{
               background: text.trim() && !disabled
                 ? 'var(--color-text-primary)'
-                : 'transparent',
+                : 'var(--color-surface-3)',
               color: text.trim() && !disabled
                 ? 'var(--color-surface-0)'
                 : 'var(--color-text-muted)',
               border: 'none',
             }}
+            title="发送 (Enter)"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 2L11 13" />
-              <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+              <path d="M12 19V5" />
+              <path d="M5 12l7-7 7 7" />
             </svg>
           </button>
         </div>

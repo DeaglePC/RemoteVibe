@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 由 scripts/fetch-fonts.mjs 生成的字体二进制文件（体积大，每台机器本地构建）
+# 对应的 CSS 声明 src/styles/fonts.generated.css 入库，以便 git diff 能看到字体变更
+public/fonts/*.woff2
+public/fonts/*.woff
+public/fonts/*.ttf
+
+# PWA store 展示图（由 npm run gen:screenshots 生成，或手工截图覆盖）
+public/screenshots/*.png

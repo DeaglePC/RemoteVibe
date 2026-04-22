@@ -1,0 +1,131 @@
+/* ==================== Theme Variables ====================
+ *
+ * 主题变量集中定义。支持深色（dark）、浅色（light）、跟随系统（auto）。
+ *
+ * 切换策略：
+ *   - `<html data-theme="dark">`：强制深色
+ *   - `<html data-theme="light">`：强制浅色
+ *   - `<html>` 无 `data-theme` 属性：跟随系统 `prefers-color-scheme`（默认）
+ *
+ * 变量命名保持和 `index.css` 中 `@theme` 块一致，
+ * 这样本文件可以**覆盖** `@theme` 产生的 `:root` 变量值，
+ * 从而实现运行时主题切换，而不需要重新构建 Tailwind。
+ *
+ * ⚠️ 本文件**不触及** Tailwind 的原子类映射（原子类仍以 @theme 首次声明为准），
+ * 只影响通过 `var(--color-xxx)` 直接引用的地方。
+ */
+
+/* ==================== Dark（默认/强制） ==================== */
+/*
+ * 默认值和当前项目的硬编码深色保持一致，保证零迁移成本：
+ * 没有任何一处代码需要改动，视觉上完全不变。
+ */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surface - 由浅到深的表面层 */
+  --color-surface-0: oklch(0.13 0.02 270);
+  --color-surface-1: oklch(0.17 0.02 270);
+  --color-surface-2: oklch(0.21 0.02 270);
+  --color-surface-3: oklch(0.25 0.02 270);
+  --color-surface-4: oklch(0.30 0.02 270);
+
+  /* Text */
+  --color-text-primary: oklch(0.95 0.01 270);
+  --color-text-secondary: oklch(0.70 0.02 270);
+  --color-text-muted: oklch(0.50 0.02 270);
+
+  /* Border */
+  --color-border: oklch(0.30 0.02 270);
+  --color-border-strong: oklch(0.40 0.03 270);
+
+  /* Theme meta 颜色（供 JS 同步写入 <meta name="theme-color">） */
+  --theme-meta-color: #13051b;
+}
+
+/* ==================== Light（强制浅色） ==================== */
+/*
+ * 浅色主题：保持和深色相同的色相（270 紫 / 195 青），
+ * 仅通过明度反转来获得对比度。确保 WCAG AA 级对比度。
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surface - 浅色从最亮 surface-0 到较深 surface-4 */
+  --color-surface-0: oklch(0.99 0.005 270);
+  --color-surface-1: oklch(0.97 0.008 270);
+  --color-surface-2: oklch(0.94 0.012 270);
+  --color-surface-3: oklch(0.90 0.015 270);
+  --color-surface-4: oklch(0.85 0.018 270);
+
+  /* Text - 深色文字在浅色背景上 */
+  --color-text-primary: oklch(0.20 0.02 270);
+  --color-text-secondary: oklch(0.40 0.02 270);
+  --color-text-muted: oklch(0.55 0.02 270);
+
+  /* Border - 在浅色下需要更柔和 */
+  --color-border: oklch(0.88 0.015 270);
+  --color-border-strong: oklch(0.78 0.020 270);
+
+  /* 浅色下品牌主色适度加深以保证按钮对比度 */
+  --color-brand-500: oklch(0.50 0.22 270);
+  --color-brand-600: oklch(0.43 0.24 270);
+  --color-accent-500: oklch(0.60 0.18 195);
+  --color-accent-600: oklch(0.52 0.16 195);
+
+  --theme-meta-color: #ffffff;
+}
+
+/* ==================== Auto（跟随系统） ====================
+ *
+ * ⚠️ 暂时禁用系统主题自动响应。
+ *
+ * 原因：当前项目里 TopBar / InputBar / ChatStatusBar 等多处组件使用了
+ * 硬编码的深色值（例如 `style={{ background: '#xxx' }}` 或内联 oklch 深色），
+ * 这些值不受 CSS 变量控制。如果启用 `@media (prefers-color-scheme: light)`，
+ * 只有 body 背景会被切成浅色，而顶栏/底栏仍是深色 — 浅色文字在浅色背景上不可读。
+ *
+ * 计划：等 P3/P4 阶段把这些组件的硬编码深色替换为 `var(--color-surface-x)` 等
+ * 主题变量后，再打开此段 auto 响应。
+ *
+ * 目前效果：
+ *   - `<html>` 无 data-theme 属性时 → 始终走上方 :root 定义的深色（视觉零变化）
+ *   - `<html data-theme="light">` → 强制浅色（仅供 P3 后调试用）
+ *   - `<html data-theme="dark">` → 强制深色
+ */
+
+/*
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+
+    --color-surface-0: oklch(0.99 0.005 270);
+    --color-surface-1: oklch(0.97 0.008 270);
+    --color-surface-2: oklch(0.94 0.012 270);
+    --color-surface-3: oklch(0.90 0.015 270);
+    --color-surface-4: oklch(0.85 0.018 270);
+
+    --color-text-primary: oklch(0.20 0.02 270);
+    --color-text-secondary: oklch(0.40 0.02 270);
+    --color-text-muted: oklch(0.55 0.02 270);
+
+    --color-border: oklch(0.88 0.015 270);
+    --color-border-strong: oklch(0.78 0.020 270);
+
+    --color-brand-500: oklch(0.50 0.22 270);
+    --color-brand-600: oklch(0.43 0.24 270);
+    --color-accent-500: oklch(0.60 0.18 195);
+    --color-accent-600: oklch(0.52 0.16 195);
+
+    --theme-meta-color: #ffffff;
+  }
+}
+*/
+
+/* 系统深色时，继续使用默认 :root 的深色定义（无需重复声明）。 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+  }
+}
