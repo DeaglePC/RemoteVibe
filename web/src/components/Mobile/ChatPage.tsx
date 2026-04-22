@@ -5,7 +5,7 @@ import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { useAutoReconnect } from '../../hooks/useAutoReconnect';
 import ChatView from '../ChatView/ChatView';
 import InputBar from '../ChatView/InputBar';
-import ChatRuntimeStrip from '../ChatView/ChatRuntimeStrip';
+import { ActivityBadge, ConnectivityBadge } from '../ChatView/ChatRuntimeStrip';
 import MobilePageHeader from '../Layout/MobilePageHeader';
 import HeaderMetrics from '../Layout/HeaderMetrics';
 
@@ -14,13 +14,14 @@ import HeaderMetrics from '../Layout/HeaderMetrics';
  *
  * - 左上角返回按钮 ← pop 回首页（首页 TabBar 自动重新显示）
  * - 右上角 📂 文件按钮 push 到文件树页（L3）
- * - 页面内部布局：ChatRuntimeStrip 運行态头 + ChatView（flex:1） + InputBar
+ * - 页面内部布局：ChatView（flex:1） + Activity 徽标 + InputBar
  *
  * 小细节：
  *  - Header 带 safe-area-inset-top；底部不加 safe-area，由 InputBar 自己负责内边距
  *  - 禁用运行中的会话输入由 isAgentRunning 控制
  *  - Model、Context 等运行态指标在 PageHeader 右侧展示（HeaderMetrics）
- *  - 连接状态点、Remote/Local、Activity 在 ChatRuntimeStrip 展示
+ *  - 连接状态（就绪 / 点击恢复 / 离线…）通过 ConnectivityBadge 嵌在 Header 副标题
+ *  - Agent Activity（Thinking / Using tools…）通过 ActivityBadge 展示在输入框左上方
  */
 interface Props {
   onSendPrompt: (text: string) => void;
@@ -69,7 +70,7 @@ export default function ChatPage({
     <>
       <MobilePageHeader
         title={session?.name || '聊天'}
-        subtitle={session?.workDir || undefined}
+        subtitle={<ConnectivityBadge onReconnectSession={onReconnectSession} />}
         onBack={handleBack}
         rightSlot={
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -108,8 +109,19 @@ export default function ChatPage({
           transition: 'padding-bottom var(--duration-fast, 120ms) var(--ease-out, ease-out)',
         }}
       >
-        <ChatRuntimeStrip onReconnectSession={onReconnectSession} />
         <ChatView onPermissionRespond={onPermissionRespond} />
+        {/* 输入框左上方：Agent 当前活动徽标（Thinking / Using tools / Responding…） */}
+        <div
+          style={{
+            flexShrink: 0,
+            padding: '2px 16px 0',
+            minHeight: 18,
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <ActivityBadge />
+        </div>
         <InputBar
           onSend={onSendPrompt}
           onSlashCommand={onSlashCommand}

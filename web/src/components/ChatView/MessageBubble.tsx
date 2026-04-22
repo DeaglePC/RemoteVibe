@@ -3,6 +3,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import type { ReactNode } from 'react';
 import type { ChatMessage, ToolCallState } from '../../stores/chatStore';
 import type { PermissionRequestPayload } from '../../types/protocol';
 import InlineToolCall from './InlineToolCall';
@@ -36,18 +37,43 @@ function parseSystemContent(content: string): { icon: string | null; text: strin
 /**
  * 判断系统消息是否需要"长内容卡片"样式。
  *
- * - 含换行（多行）
- * - 长度 > 80
- * - 含 Markdown 语法标记（反引号 / 粗体 / 列表项）
+ * 仅在真正需要 Markdown 结构化渲染时才使用大卡片：
+ * - 多行（含换行）
+ * - 极长（> 160）
+ * - 明确的 Markdown 结构（代码围栏 ``` / 列表项 / 粗体）
  *
- * 满足任一条件时，改用多行卡片 + Markdown 渲染；否则保留原有的
- * 单行 chip 样式（适合 "🧹 Chat history cleared." 这类短提示）。
+ * 单个反引号包裹的 inline code（如 session id）不算富内容，
+ * 继续走紧凑的 chip 样式，仅对反引号部分做轻量 code 渲染。
  */
 function isRichSystemContent(text: string): boolean {
   if (text.includes('\n')) return true;
-  if (text.length > 80) return true;
-  if (/[`*]/.test(text)) return true;
+  if (text.length > 160) return true;
+  if (text.includes('```')) return true;
+  if (/\*\*[^*]+\*\*/.test(text)) return true;
+  if (/^\s*[-*]\s+/m.test(text)) return true;
   return false;
+}
+
+/**
+ * 把形如 `code` 的 inline code 片段渲染为带背景的 <code>，其它按纯文本输出。
+ * 仅用于 chip 样式下，避免引入完整的 Markdown 渲染开销。
+ */
+function renderChipText(text: string): ReactNode {
+  const parts = text.split(/(`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+      return (
+        <code
+          key={i}
+          className="px-1 py-[1px] rounded text-[0.68rem] font-mono"
+          style={{ background: 'var(--color-surface-2)', color: 'var(--color-text-secondary)' }}
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
 }
 
 export default function MessageBubble({ message, index, toolCalls = [], pendingPermissions = [] }: Props) {
@@ -123,22 +149,22 @@ export default function MessageBubble({ message, index, toolCalls = [], pendingP
       );
     }
 
-    // 短提示：保留原有的居中 chip 样式
+    // 短提示：紧凑 chip 样式（自适应宽度，支持 inline code）
     return (
       <div
-        className="animate-fade-in-up flex justify-center py-2"
+        className="animate-fade-in-up flex justify-center py-0.5"
         style={{ animationDelay: `${index * 30}ms` }}
       >
         <div
-          className="inline-flex items-center gap-1.5 text-[0.72rem] px-3 py-1.5 rounded-lg max-w-[85%]"
+          className="inline-flex items-center gap-1 text-[0.7rem] px-2 py-0.5 rounded-md max-w-[90%] leading-snug"
           style={{
             background: 'var(--color-surface-1)',
             color: 'var(--color-text-muted)',
             border: '1px solid var(--color-border)',
           }}
         >
-          {icon && <span className="text-xs flex-shrink-0">{icon}</span>}
-          <span className="truncate">{text}</span>
+          {icon && <span className="text-[0.72rem] flex-shrink-0 leading-none">{icon}</span>}
+          <span className="min-w-0 break-words">{renderChipText(text)}</span>
         </div>
       </div>
     );

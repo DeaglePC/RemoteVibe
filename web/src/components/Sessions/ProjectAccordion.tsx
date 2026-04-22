@@ -100,13 +100,13 @@ export default function ProjectAccordion({ onNewSession, onSessionSelect, hideHe
       }}
     >
       {/* 顶栏：第一行 标题 + 机器 chip（可选，hideHeader=true 时不渲染）；第二行 搜索 + 新建。
-          移动端放大字号、热区（>= 40px）以改善触控体验；PC 端保持紧凑。*/}
+          移动端放大字号、热区（>= 40px）以改善触控体验；PC 端也适当放宽 padding/gap 以获得更好的呼吸感。*/}
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: isMobile ? 8 : 6,
-          padding: isMobile ? '10px 12px' : '8px 10px',
+          gap: isMobile ? 10 : 10,
+          padding: isMobile ? '12px 12px' : '12px 12px 10px',
           borderBottom: '1px solid var(--color-border)',
         }}
       >
@@ -116,16 +116,24 @@ export default function ProjectAccordion({ onNewSession, onSessionSelect, hideHe
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: 6,
+              gap: 8,
+              minHeight: 24,
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: 'var(--color-text-primary)',
+                letterSpacing: 0.2,
+              }}
+            >
               会话
             </span>
             <BackendSwitcherChip compact />
           </div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 8 }}>
           <input
             type="search"
             value={query}
@@ -134,15 +142,15 @@ export default function ProjectAccordion({ onNewSession, onSessionSelect, hideHe
             style={{
               flex: 1,
               minWidth: 0,
-              height: isMobile ? 40 : undefined,
-              padding: isMobile ? '0 12px' : '4px 8px',
+              height: isMobile ? 40 : 30,
+              padding: isMobile ? '0 12px' : '0 10px',
               // 移动端字号 >= 16px 避免 iOS Safari 聚焦时自动缩放
-              fontSize: isMobile ? 16 : 12,
+              fontSize: isMobile ? 16 : 12.5,
               lineHeight: 1.4,
               color: 'var(--color-text-primary)',
               background: 'var(--color-surface-1)',
               border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-sm, 6px)',
+              borderRadius: 'var(--radius-md, 8px)',
               outline: 'none',
             }}
           />
@@ -153,20 +161,27 @@ export default function ProjectAccordion({ onNewSession, onSessionSelect, hideHe
             aria-label="新建会话"
             style={{
               appearance: 'none',
-              width: isMobile ? 40 : 24,
-              height: isMobile ? 40 : 24,
+              width: isMobile ? 40 : 30,
+              height: isMobile ? 40 : 30,
               flexShrink: 0,
               padding: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              borderRadius: 'var(--radius-sm, 6px)',
+              borderRadius: 'var(--radius-md, 8px)',
               border: '1px solid var(--color-border)',
-              background: 'transparent',
+              background: 'var(--color-surface-1)',
               color: 'var(--color-text-primary)',
               cursor: 'pointer',
-              fontSize: isMobile ? 20 : 14,
+              fontSize: isMobile ? 20 : 16,
               lineHeight: 1,
+              transition: 'background 120ms ease, border-color 120ms ease',
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-surface-2)';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-surface-1)';
             }}
           >
             ＋

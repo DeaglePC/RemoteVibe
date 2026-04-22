@@ -48,6 +48,10 @@ interface UIState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebarCollapsed: () => void;
 
+  /** Sidebar 宽度（PC 端，单位 px），可由用户拖拽调整 */
+  sidebarWidth: number;
+  setSidebarWidth: (w: number) => void;
+
   /** 右侧 Pane 是否打开（PC 端） */
   rightPaneOpen: boolean;
   setRightPaneOpen: (open: boolean) => void;
@@ -101,8 +105,19 @@ const STORAGE_VERSION = 1;
 interface PersistedUI {
   shellFlavor: ShellFlavor;
   sidebarCollapsed: boolean;
+  sidebarWidth?: number;
   autoReconnectOnOpen?: boolean;
   version: number;
+}
+
+/** Sidebar 宽度默认值与合法范围（px） */
+const SIDEBAR_WIDTH_DEFAULT = 240;
+const SIDEBAR_WIDTH_MIN = 180;
+const SIDEBAR_WIDTH_MAX = 480;
+
+function clampSidebarWidth(w: number): number {
+  if (!Number.isFinite(w)) return SIDEBAR_WIDTH_DEFAULT;
+  return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(w)));
 }
 
 /** 从 URL `?shell=xxx` 读取 shell 偏好（仅当值合法时生效） */
@@ -115,36 +130,66 @@ function readShellFromUrl(): ShellFlavor | null {
 }
 
 /** 从 localStorage 加载 UI 偏好 */
-function loadUIPreference(): { shellFlavor: ShellFlavor; sidebarCollapsed: boolean; autoReconnectOnOpen: boolean } {
+function loadUIPreference(): {
+  shellFlavor: ShellFlavor;
+  sidebarCollapsed: boolean;
+  sidebarWidth: number;
+  autoReconnectOnOpen: boolean;
+} {
   // URL 参数最高优先级，允许从网址临时切换
   const urlShell = readShellFromUrl();
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return { shellFlavor: urlShell ?? 'pwa', sidebarCollapsed: false, autoReconnectOnOpen: true };
+      return {
+        shellFlavor: urlShell ?? 'pwa',
+        sidebarCollapsed: false,
+        sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+        autoReconnectOnOpen: true,
+      };
     }
     const data: PersistedUI = JSON.parse(raw);
     if (data.version !== STORAGE_VERSION) {
       localStorage.removeItem(STORAGE_KEY);
-      return { shellFlavor: urlShell ?? 'pwa', sidebarCollapsed: false, autoReconnectOnOpen: true };
+      return {
+        shellFlavor: urlShell ?? 'pwa',
+        sidebarCollapsed: false,
+        sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+        autoReconnectOnOpen: true,
+      };
     }
     return {
       shellFlavor: urlShell ?? (data.shellFlavor === 'classic' || data.shellFlavor === 'pwa' ? data.shellFlavor : 'pwa'),
       sidebarCollapsed: Boolean(data.sidebarCollapsed),
+      sidebarWidth:
+        typeof data.sidebarWidth === 'number'
+          ? clampSidebarWidth(data.sidebarWidth)
+          : SIDEBAR_WIDTH_DEFAULT,
       autoReconnectOnOpen: data.autoReconnectOnOpen !== false,
     };
   } catch {
-    return { shellFlavor: urlShell ?? 'pwa', sidebarCollapsed: false, autoReconnectOnOpen: true };
+    return {
+      shellFlavor: urlShell ?? 'pwa',
+      sidebarCollapsed: false,
+      sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+      autoReconnectOnOpen: true,
+    };
   }
 }
 
 /** 保存 UI 偏好到 localStorage */
-function persistUI(shellFlavor: ShellFlavor, sidebarCollapsed: boolean, autoReconnectOnOpen: boolean): void {
+function persistUI(
+  shellFlavor: ShellFlavor,
+  sidebarCollapsed: boolean,
+  autoReconnectOnOpen: boolean,
+  sidebarWidth: number,
+): void {
   try {
     const data: PersistedUI = {
       shellFlavor,
       sidebarCollapsed,
+      sidebarWidth,
       autoReconnectOnOpen,
       version: STORAGE_VERSION,
     };
@@ -171,12 +216,20 @@ export const useUIStore = create<UIState>((set, get) => ({
   sidebarCollapsed: initial.sidebarCollapsed,
   setSidebarCollapsed: (collapsed) => {
     set({ sidebarCollapsed: collapsed });
-    persistUI(get().shellFlavor, collapsed, get().autoReconnectOnOpen);
+    persistUI(get().shellFlavor, collapsed, get().autoReconnectOnOpen, get().sidebarWidth);
   },
   toggleSidebarCollapsed: () => {
     const next = !get().sidebarCollapsed;
     set({ sidebarCollapsed: next });
-    persistUI(get().shellFlavor, next, get().autoReconnectOnOpen);
+    persistUI(get().shellFlavor, next, get().autoReconnectOnOpen, get().sidebarWidth);
+  },
+
+  sidebarWidth: initial.sidebarWidth,
+  setSidebarWidth: (w) => {
+    const next = clampSidebarWidth(w);
+    if (next === get().sidebarWidth) return;
+    set({ sidebarWidth: next });
+    persistUI(get().shellFlavor, get().sidebarCollapsed, get().autoReconnectOnOpen, next);
   },
 
   rightPaneOpen: false,
@@ -192,7 +245,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   shellFlavor: initial.shellFlavor,
   setShellFlavor: (flavor) => {
     set({ shellFlavor: flavor });
-    persistUI(flavor, get().sidebarCollapsed, get().autoReconnectOnOpen);
+    persistUI(flavor, get().sidebarCollapsed, get().autoReconnectOnOpen, get().sidebarWidth);
   },
 
   activeSettingsPage: null,
@@ -201,7 +254,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   autoReconnectOnOpen: initial.autoReconnectOnOpen,
   setAutoReconnectOnOpen: (v) => {
     set({ autoReconnectOnOpen: v });
-    persistUI(get().shellFlavor, get().sidebarCollapsed, v);
+    persistUI(get().shellFlavor, get().sidebarCollapsed, v, get().sidebarWidth);
   },
 
   // ==================== 手机端导航（P4） ====================

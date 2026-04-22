@@ -10,6 +10,156 @@ import {
 // 仅以下活动标签代表 Agent 正在工作中；显示脉冲徽标以增强可感知
 const BUSY_ACTIVITY_LABELS = new Set(['Thinking', 'Responding', 'Using tools', 'Starting']);
 
+/**
+ * ConnectivityBadge 独立渲染 "● 就绪 / 点击恢复 / 启动中… / 离线" 综合可用状态按钮。
+ *
+ * 抽离自 ChatRuntimeStrip 以便在手机端 Header 副标题等位置独立使用。
+ */
+export function ConnectivityBadge({ onReconnectSession }: { onReconnectSession?: () => void }) {
+  const activeAgentId = useChatStore((s) => s.activeAgentId);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const activeWorkDir = useChatStore((s) => s.activeWorkDir);
+  const agentStatus = useChatStore((s) => s.agentStatus);
+  const wsStatus = useChatStore((s) => s.wsStatus);
+
+  const hasRestorableSession = !!(activeSessionId && activeAgentId && activeWorkDir);
+
+  const connectivity: ConnectivityState = useMemo(
+    () => buildConnectivityState({ wsStatus, agentStatus, hasRestorableSession }),
+    [wsStatus, agentStatus, hasRestorableSession],
+  );
+
+  const handleStatusClick = () => {
+    if (connectivity.clickable && onReconnectSession) {
+      onReconnectSession();
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleStatusClick}
+      disabled={!connectivity.clickable}
+      title={connectivity.title}
+      aria-label={connectivity.title}
+      style={{
+        appearance: 'none',
+        border: 0,
+        background: 'transparent',
+        padding: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        minWidth: 0,
+        cursor: connectivity.clickable ? 'pointer' : 'default',
+      }}
+    >
+      <span
+        aria-hidden
+        className={connectivity.pulsing ? 'animate-pulse' : undefined}
+        style={{
+          display: 'inline-block',
+          width: 7,
+          height: 7,
+          borderRadius: '50%',
+          background: connectivity.tone,
+          boxShadow: connectivity.kind === 'ready' ? `0 0 6px ${connectivity.tone}` : 'none',
+          flexShrink: 0,
+        }}
+      />
+      <span
+        style={{
+          fontSize: 11,
+          color: connectivity.tone,
+          fontWeight: 500,
+          textDecoration: connectivity.clickable ? 'underline dotted' : 'none',
+          textUnderlineOffset: 2,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {connectivity.text}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * ActivityBadge 独立渲染 Agent 当前活动（Thinking / Responding / Using tools…）的脉冲徽标。
+ *
+ * 抽离自 ChatRuntimeStrip 以便在输入框左上方等位置独立使用。
+ * 当 Agent 处于空闲/非忙碌状态时返回 null，不占位。
+ */
+export function ActivityBadge() {
+  const agents = useChatStore((s) => s.agents);
+  const activeAgentId = useChatStore((s) => s.activeAgentId);
+  const activeWorkDir = useChatStore((s) => s.activeWorkDir);
+  const activeModel = useChatStore((s) => s.activeModel);
+  const agentStatus = useChatStore((s) => s.agentStatus);
+  const agentActivity = useChatStore((s) => s.agentActivity);
+  const lastTurnStats = useChatStore((s) => s.lastTurnStats);
+  const wsStatus = useChatStore((s) => s.wsStatus);
+  const toolCalls = useChatStore((s) => s.toolCalls);
+  const pendingPermissionRequests = useChatStore((s) => s.pendingPermissions.length);
+
+  const activeAgent = agents.find((a) => a.id === activeAgentId) || null;
+  const pendingToolCalls = Array.from(toolCalls.values()).filter((tc) => {
+    return tc.status === 'pending' || tc.status === 'in_progress';
+  }).length;
+
+  const viewModel: ChatStatusViewModel = useMemo(() => {
+    return buildChatStatusViewModel({
+      agentName: activeAgent?.name || null,
+      agentMode: activeAgent?.mode || null,
+      workDir: activeWorkDir,
+      activeModel,
+      agentStatus,
+      agentActivity,
+      lastTurnStats,
+      pendingToolCalls,
+      pendingPermissionRequests,
+      hasRestorableSession: false,
+      wsStatus,
+    });
+  }, [
+    activeAgent?.mode,
+    activeAgent?.name,
+    activeModel,
+    activeWorkDir,
+    agentActivity,
+    agentStatus,
+    lastTurnStats,
+    pendingPermissionRequests,
+    pendingToolCalls,
+    wsStatus,
+  ]);
+
+  const activityLabel = viewModel.activity.value;
+  const isBusy = BUSY_ACTIVITY_LABELS.has(activityLabel);
+  if (!isBusy) {
+    return null;
+  }
+  const activityTone = getActivityTone(activityLabel);
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      <span
+        aria-hidden
+        className="animate-pulse"
+        style={{
+          display: 'inline-block',
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: activityTone,
+        }}
+      />
+      <span style={{ fontSize: 11, color: activityTone, fontWeight: 500, whiteSpace: 'nowrap' }}>
+        {activityLabel}
+      </span>
+    </span>
+  );
+}
+
 interface Props {
   onReconnectSession?: () => void;
 }

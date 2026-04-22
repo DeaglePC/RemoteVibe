@@ -12,7 +12,10 @@ import type { ReactNode } from 'react';
  */
 interface Props {
   title: string;
-  subtitle?: string;
+  /**
+   * 副标题。支持纯字符串或自定义 ReactNode（例如状态徽标）。
+   */
+  subtitle?: ReactNode;
   /** 点击返回回调；不传则不显示返回按钮（L1 页） */
   onBack?: () => void;
   /** 右侧自定义内容（按钮组 / 等） */

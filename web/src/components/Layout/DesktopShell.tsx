@@ -6,7 +6,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { useAutoReconnect } from '../../hooks/useAutoReconnect';
 import ChatView from '../ChatView/ChatView';
 import InputBar from '../ChatView/InputBar';
-import ChatRuntimeStrip from '../ChatView/ChatRuntimeStrip';
+import { ActivityBadge } from '../ChatView/ChatRuntimeStrip';
 import TopBar from './TopBar';
 import SlimActivityBar from './SlimActivityBar';
 import DesktopSidebar from './DesktopSidebar';
@@ -119,15 +119,26 @@ export default function DesktopShell({
                   minHeight: 0,
                 }}
               >
-                <MainHeader />
+                <MainHeader onReconnectSession={onReconnectSession} />
 
                 {/* 聊天 + ACPLog 竖向分割 */}
                 <div style={{ flex: 1, minHeight: 0 }}>
                   <Allotment vertical proportionalLayout={false}>
                     <Allotment.Pane minSize={200}>
                       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-                        <ChatRuntimeStrip onReconnectSession={onReconnectSession} />
                         <ChatView onPermissionRespond={onPermissionRespond} />
+                        {/* 输入框左上方的 Activity 徽标（Thinking / Using tools…），仅忙碌时占位 */}
+                        <div
+                          style={{
+                            flexShrink: 0,
+                            minHeight: 18,
+                            padding: '2px 14px 0',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <ActivityBadge />
+                        </div>
                         <InputBar
                           onSend={onSendPrompt}
                           onSlashCommand={onSlashCommand}
