@@ -312,6 +312,18 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // 桌面宽屏 → 移动窄屏时，若已有激活会话且 mobileNavStack 为空，
+  // 则自动 push 一个 chat 帧，避免窄屏回落到 L1 "会话浏览" 首页的跳跃感。
+  // 反向（窄 → 宽）不做处理，保留栈以便再次缩小时还原上下文。
+  useEffect(() => {
+    if (!isMobile) return;
+    const uiState = useUIStore.getState();
+    if (uiState.mobileNavStack.length > 0) return;
+    const activeSessionId = useChatStore.getState().activeSessionId;
+    if (!activeSessionId) return;
+    uiState.pushMobilePage({ type: 'chat', sessionId: activeSessionId });
+  }, [isMobile]);
+
   // ===== P3：新 shell（pwa）相关 =====
   const shellFlavor = useUIStore((s) => s.shellFlavor);
   const commandPaletteOpen = useUIStore((s) => s.commandPaletteOpen);
