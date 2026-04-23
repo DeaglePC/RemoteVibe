@@ -1,4 +1,6 @@
 import { useCallback } from 'react';
+import { Allotment } from 'allotment';
+import 'allotment/dist/style.css';
 import { useUIStore } from '../../stores/uiStore';
 import { useChatStore } from '../../stores/chatStore';
 import FileTreeBrowser from '../FileBrowser/FileTreeBrowser';
@@ -33,8 +35,8 @@ export default function RightPane({ onSendWS }: Props) {
     useChatStore.getState().setViewingFile(null);
   }, [setOpen]);
 
-  const handleFileOpen = useCallback((filePath: string, fileName: string) => {
-    useChatStore.getState().setViewingFile({ path: filePath, name: fileName });
+  const handleFileOpen = useCallback((filePath: string, fileName: string, fileSize?: number) => {
+    useChatStore.getState().setViewingFile({ path: filePath, name: fileName, size: fileSize });
   }, []);
 
   const handleCloseViewer = useCallback(() => {
@@ -52,25 +54,41 @@ export default function RightPane({ onSendWS }: Props) {
         flexDirection: 'column',
         minHeight: 0,
         background: 'var(--color-surface-0)',
-        borderLeft: '1px solid var(--color-border)',
+        borderRight: '1px solid var(--color-border)',
         overflow: 'hidden',
       }}
     >
       {content === 'files' && (
         <>
-          {viewingFile ? (
-            <FileViewer
-              filePath={viewingFile.path}
-              fileName={viewingFile.name}
-              onClose={handleCloseViewer}
-            />
-          ) : activeWorkDir ? (
-            <FileTreeBrowser
-              rootPath={activeWorkDir}
-              onClose={handleClose}
-              onFileOpen={handleFileOpen}
-              onSendWS={onSendWS}
-            />
+          {activeWorkDir ? (
+            viewingFile ? (
+              /* PC 模式：文件树（左）+ 文件预览（右），可拖动分割 */
+              <Allotment proportionalLayout={false}>
+                <Allotment.Pane minSize={200} preferredSize={280}>
+                  <FileTreeBrowser
+                    rootPath={activeWorkDir}
+                    onClose={handleClose}
+                    onFileOpen={handleFileOpen}
+                    onSendWS={onSendWS}
+                  />
+                </Allotment.Pane>
+                <Allotment.Pane minSize={320}>
+                  <FileViewer
+                    filePath={viewingFile.path}
+                    fileName={viewingFile.name}
+                    fileSize={viewingFile.size}
+                    onClose={handleCloseViewer}
+                  />
+                </Allotment.Pane>
+              </Allotment>
+            ) : (
+              <FileTreeBrowser
+                rootPath={activeWorkDir}
+                onClose={handleClose}
+                onFileOpen={handleFileOpen}
+                onSendWS={onSendWS}
+              />
+            )
           ) : (
             <div
               style={{

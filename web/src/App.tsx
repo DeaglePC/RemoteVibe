@@ -20,10 +20,11 @@ import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
 
 // 懒加载：ACPLogPanel 只在 /log 命令开启时才显示；
-// CommandPalette 仅 Cmd+K 打开时才渲染
-// 两个组件拆出后减小首屏 bundle 体积
+// CommandPalette 仅 Cmd+K 打开时才渲染；
+// ModelActionSheet 仅点击聊天输入栏齿轮时才显示
 const ACPLogPanel = lazy(() => import('./components/Debug/ACPLogPanel'));
 const CommandPalette = lazy(() => import('./components/CommandPalette/CommandPalette'));
+const ModelActionSheet = lazy(() => import('./components/ChatView/ModelActionSheet'));
 
 export default function App() {
   const { send } = useWebSocket();
@@ -257,8 +258,8 @@ export default function App() {
     send({ type: 'cancel', payload: {} });
   }, [send]);
 
-  const handleFileOpen = useCallback((filePath: string, fileName: string) => {
-    useChatStore.getState().setViewingFile({ path: filePath, name: fileName });
+  const handleFileOpen = useCallback((filePath: string, fileName: string, fileSize?: number) => {
+    useChatStore.getState().setViewingFile({ path: filePath, name: fileName, size: fileSize });
   }, []);
 
   const handleCloseFileViewer = useCallback(() => {
@@ -283,6 +284,11 @@ export default function App() {
 
   // 用于从 ActivityBar 触发 TopBar 的 Launch 流程
   const [showLaunchTrigger, setShowLaunchTrigger] = useState(0);
+
+  // Model action sheet（聊天输入栏齿轮点击打开）
+  const [showModelSheet, setShowModelSheet] = useState(false);
+  const handleOpenModelSheet = useCallback(() => setShowModelSheet(true), []);
+  const handleCloseModelSheet = useCallback(() => setShowModelSheet(false), []);
 
   const handleLaunch = useCallback(() => {
     // 触发 TopBar 中的 launch 逻辑 — 通过 ref 或设置状态
@@ -363,6 +369,7 @@ export default function App() {
           onStopAgent={handleStopAgent}
           onSendPrompt={handleSendPrompt}
           onSlashCommand={handleSlashCommand}
+          onOpenModelSheet={handleOpenModelSheet}
           onCancel={handleCancel}
           onReconnectSession={handleReconnectSession}
           onPermissionRespond={handlePermissionRespond}
@@ -388,6 +395,7 @@ export default function App() {
               <FileViewer
                 filePath={viewingFile.path}
                 fileName={viewingFile.name}
+                fileSize={viewingFile.size}
                 onClose={handleCloseFileViewer}
                 isMobile
               />
@@ -400,6 +408,7 @@ export default function App() {
               <InputBar
                 onSend={handleSendPrompt}
                 onSlashCommand={handleSlashCommand}
+                onOpenModelSheet={handleOpenModelSheet}
                 disabled={!isAgentRunning}
                 isThinking={isThinking}
                 onCancel={handleCancel}
@@ -414,6 +423,7 @@ export default function App() {
           onStopAgent={handleStopAgent}
           onSendPrompt={handleSendPrompt}
           onSlashCommand={handleSlashCommand}
+          onOpenModelSheet={handleOpenModelSheet}
           onCancel={handleCancel}
           onReconnectSession={handleReconnectSession}
           onPermissionRespond={handlePermissionRespond}
@@ -459,6 +469,7 @@ export default function App() {
                     <FileViewer
                       filePath={viewingFile.path}
                       fileName={viewingFile.name}
+                      fileSize={viewingFile.size}
                       onClose={handleCloseFileViewer}
                     />
                   </div>
@@ -476,6 +487,7 @@ export default function App() {
                       <InputBar
                         onSend={handleSendPrompt}
                         onSlashCommand={handleSlashCommand}
+                        onOpenModelSheet={handleOpenModelSheet}
                         disabled={!isAgentRunning}
                         isThinking={isThinking}
                         onCancel={handleCancel}
@@ -509,6 +521,13 @@ export default function App() {
             onClose={() => setCommandPaletteOpen(false)}
             commands={commands}
           />
+        </Suspense>
+      )}
+
+      {/* Model action sheet — 聊天输入栏齿轮打开 */}
+      {showModelSheet && (
+        <Suspense fallback={null}>
+          <ModelActionSheet open={showModelSheet} onClose={handleCloseModelSheet} />
         </Suspense>
       )}
     </div>

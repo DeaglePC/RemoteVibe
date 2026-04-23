@@ -27,8 +27,8 @@ export function FilesTreePage({ rootPath, onSendWS }: FilesTreePageProps) {
   }, [popMobilePage]);
 
   const handleFileOpen = useCallback(
-    (filePath: string, fileName: string) => {
-      pushMobilePage({ type: 'file-viewer', path: filePath, name: fileName });
+    (filePath: string, fileName: string, fileSize?: number) => {
+      pushMobilePage({ type: 'file-viewer', path: filePath, name: fileName, size: fileSize });
     },
     [pushMobilePage],
   );
@@ -46,14 +46,15 @@ export function FilesTreePage({ rootPath, onSendWS }: FilesTreePageProps) {
 interface FileViewerPageProps {
   path: string;
   name: string;
+  size?: number;
 }
 
-export function FileViewerPage({ path, name }: FileViewerPageProps) {
+export function FileViewerPage({ path, name, size }: FileViewerPageProps) {
   const popMobilePage = useUIStore((s) => s.popMobilePage);
 
   const handleClose = useCallback(() => {
     popMobilePage();
   }, [popMobilePage]);
 
-  return <FileViewer filePath={path} fileName={name} onClose={handleClose} isMobile />;
+  return <FileViewer filePath={path} fileName={name} fileSize={size} onClose={handleClose} isMobile />;
 }

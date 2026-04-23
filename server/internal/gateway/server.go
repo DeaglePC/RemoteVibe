@@ -94,6 +94,7 @@ func NewServer(cfg *config.Config, mgr *agent.Manager) *Server {
 	mux.HandleFunc("/api/mkdir", s.handleMkdir)
 	mux.HandleFunc("/api/files", s.handleFiles)
 	mux.HandleFunc("/api/file-content", s.handleFileContent)
+	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/workspaces", s.handleWorkspaces)
 	mux.HandleFunc("/api/auth-status", s.handleAuthStatus)

@@ -2,10 +2,12 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { getSlashCommands, inferAgentKind } from '../../types/protocol';
 import type { SlashCommand } from '../../types/protocol';
+import { uploadFiles, type UploadedFile, MAX_UPLOAD_COUNT } from '../../utils/uploadFiles';
 
 interface Props {
   onSend: (text: string) => void;
   onSlashCommand: (commandId: string) => void;
+  onOpenModelSheet?: () => void;
   disabled?: boolean;
   isThinking?: boolean;
   onCancel?: () => void;
@@ -13,13 +15,16 @@ interface Props {
 
 /**
  * InputBar 是聊天输入框组件。
- * 支持：Enter 发送、Shift+Enter 换行、/ 命令模式下拉框、自动高度调整。
+ * 支持：Enter 发送、Shift+Enter 换行、/ 命令模式下拉框、自动高度调整、齿轮按钮打开 Model action sheet。
  */
-export default function InputBar({ onSend, onSlashCommand, disabled, isThinking, onCancel }: Props) {
+export default function InputBar({ onSend, onSlashCommand, onOpenModelSheet, disabled, isThinking, onCancel }: Props) {
   const [text, setText] = useState('');
   const [selectedCommandIdx, setSelectedCommandIdx] = useState(0);
+  const [attachments, setAttachments] = useState<UploadedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const commandListRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 根据当前激活 agent 推断 kind，缩小命令范围
   const activeAgentId = useChatStore((s) => s.activeAgentId);
@@ -56,14 +61,82 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
   const resetComposer = useCallback(() => {
     setText('');
     setSelectedCommandIdx(0);
+    setAttachments([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
   }, []);
 
+  /**
+   * 处理附件上传：把用户选择的文件 POST 到后端，成功后以 chip 形式展示；
+   * 发送时会把每个附件的绝对路径以 @<abs> 形式前置拼接到提示词里。
+   */
+  const handleFilesSelected = useCallback(async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    const workDir = useChatStore.getState().activeWorkDir;
+    if (!workDir) {
+      useChatStore.getState().addMessage({
+        id: `msg_${Date.now()}`,
+        role: 'system',
+        content: '⚠️ 请先选择工作目录后再上传文件。',
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    // 限制合并后总数不超过上限
+    const remaining = MAX_UPLOAD_COUNT - attachments.length;
+    if (remaining <= 0) {
+      useChatStore.getState().addMessage({
+        id: `msg_${Date.now()}`,
+        role: 'system',
+        content: `⚠️ 已达到附件数量上限（${MAX_UPLOAD_COUNT}），请先移除部分附件。`,
+        timestamp: Date.now(),
+      });
+      return;
+    }
+    const toUpload = files.slice(0, remaining);
+
+    setUploading(true);
+    try {
+      const result = await uploadFiles(toUpload, workDir);
+      if (result.files.length > 0) {
+        setAttachments((prev) => [...prev, ...result.files]);
+      }
+      if (result.errors.length > 0) {
+        const lines = result.errors.map((e) => `• ${e.name}: ${e.message}`).join('\n');
+        useChatStore.getState().addMessage({
+          id: `msg_${Date.now()}`,
+          role: 'system',
+          content: `⚠️ 部分文件上传失败：\n${lines}`,
+          timestamp: Date.now(),
+        });
+      }
+    } catch (err) {
+      useChatStore.getState().addMessage({
+        id: `msg_${Date.now()}`,
+        role: 'system',
+        content: `❌ 上传失败：${err instanceof Error ? err.message : String(err)}`,
+        timestamp: Date.now(),
+      });
+    } finally {
+      setUploading(false);
+    }
+  }, [attachments.length]);
+
+  const removeAttachment = useCallback((absPath: string) => {
+    setAttachments((prev) => prev.filter((a) => a.absPath !== absPath));
+  }, []);
+
   const handleSubmit = useCallback(() => {
     const trimmedText = text.trim();
-    if (!trimmedText || disabled) {
+    // 允许仅携带附件、无文字的发送
+    if (!trimmedText && attachments.length === 0) {
+      return;
+    }
+    if (disabled) {
       return;
     }
 
@@ -81,9 +154,16 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
       return;
     }
 
-    onSend(trimmedText);
+    // 把附件以 @<绝对路径> 前置拼接到提示词里，供 AI Agent 识别
+    const attachmentPrefix = attachments.length > 0
+      ? attachments.map((a) => `@${a.absPath}`).join(' ')
+      : '';
+    const finalText = attachmentPrefix
+      ? (trimmedText ? `${attachmentPrefix} ${trimmedText}` : attachmentPrefix)
+      : trimmedText;
+    onSend(finalText);
     resetComposer();
-  }, [activeCommandIdx, availableCommands, disabled, filteredCommands, onSend, onSlashCommand, resetComposer, showCommands, text]);
+  }, [activeCommandIdx, attachments, availableCommands, disabled, filteredCommands, onSend, onSlashCommand, resetComposer, showCommands, text]);
 
   const selectCommand = useCallback((command: SlashCommand) => {
     onSlashCommand(command.id);
@@ -144,10 +224,7 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
   }, [activeCommandIdx, showCommands]);
 
   return (
-    <div
-      className="glass-strong px-4 py-3 relative"
-      style={{ borderTop: '1px solid var(--color-border)' }}
-    >
+    <div className="px-4 py-3 relative">
       {showCommands && (
         <div
           ref={commandListRef}
@@ -252,6 +329,70 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
           border: `1px solid ${showCommands ? 'var(--color-accent-500)' : 'var(--color-border)'}`,
         }}
       >
+        {/* 隐藏的文件选择器，由 📎 按钮触发 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            void handleFilesSelected(e.target.files);
+            // 清空当前值，保证同一文件连续选择也能触发 onChange
+            if (fileInputRef.current) fileInputRef.current.value = '';
+          }}
+        />
+
+        {/* 附件 chips 区：仅在有附件或上传中时显示 */}
+        {(attachments.length > 0 || uploading) && (
+          <div className="flex flex-wrap gap-1.5 px-1 pb-1">
+            {attachments.map((att) => (
+              <div
+                key={att.absPath}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs"
+                style={{
+                  background: 'var(--color-surface-2)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border)',
+                  maxWidth: '220px',
+                }}
+                title={att.absPath}
+              >
+                <span className="flex-shrink-0">{att.isImage ? '🖼️' : '📎'}</span>
+                <span className="truncate" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+                  {att.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(att.absPath)}
+                  className="flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center hover:bg-[color:var(--color-surface-3)] cursor-pointer"
+                  style={{ border: 'none', background: 'transparent', color: 'var(--color-text-muted)', padding: 0, lineHeight: 1 }}
+                  title="移除附件"
+                  aria-label={`移除 ${att.name}`}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6L6 18" />
+                    <path d="M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+            {uploading && (
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs animate-pulse"
+                style={{
+                  background: 'var(--color-surface-2)',
+                  color: 'var(--color-text-muted)',
+                  border: '1px dashed var(--color-border)',
+                  fontSize: '0.7rem',
+                }}
+              >
+                <span>⏳</span>
+                <span>上传中...</span>
+              </div>
+            )}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           value={text}
@@ -274,17 +415,12 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
           {/* 左：📎 附件 / ⚙️ 斜杠命令 / ⏹ 取消 */}
           <div className="flex items-center gap-0.5">
             <button
-              className="p-1.5 rounded-lg transition-all duration-150 hover:bg-[color:var(--color-surface-2)] active:scale-95 cursor-pointer"
+              className="p-1.5 rounded-lg transition-all duration-150 hover:bg-[color:var(--color-surface-2)] active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
-              title="Attach file"
+              title="上传附件或图片"
+              disabled={uploading}
               onClick={() => {
-                const store = useChatStore.getState();
-                store.addMessage({
-                  id: `msg_${Date.now()}`,
-                  role: 'system',
-                  content: '📎 File upload will be available soon.',
-                  timestamp: Date.now(),
-                });
+                fileInputRef.current?.click();
               }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -296,20 +432,11 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
               type="button"
               className="p-1.5 rounded-lg transition-all duration-150 hover:bg-[color:var(--color-surface-2)] active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
-              title="斜杠命令"
+              title="选择下次会话的默认模型"
               disabled={disabled}
               onClick={() => {
                 if (disabled) return;
-                // 以 "/" 触发命令面板（复用现有按 kind 过滤的命令下拉）
-                setText('/');
-                // 下一帧聚焦到 textarea 末尾，方便继续输入
-                requestAnimationFrame(() => {
-                  const ta = textareaRef.current;
-                  if (ta) {
-                    ta.focus();
-                    ta.setSelectionRange(1, 1);
-                  }
-                });
+                onOpenModelSheet?.();
               }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -336,13 +463,13 @@ export default function InputBar({ onSend, onSlashCommand, disabled, isThinking,
           {/* 右：圆形发送按钮 */}
           <button
             onClick={handleSubmit}
-            disabled={!text.trim() || disabled}
+            disabled={(!text.trim() && attachments.length === 0) || disabled || uploading}
             className="w-9 h-9 flex items-center justify-center rounded-full transition-all duration-200 hover:scale-105 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             style={{
-              background: text.trim() && !disabled
+              background: (text.trim() || attachments.length > 0) && !disabled && !uploading
                 ? 'var(--color-text-primary)'
                 : 'var(--color-surface-3)',
-              color: text.trim() && !disabled
+              color: (text.trim() || attachments.length > 0) && !disabled && !uploading
                 ? 'var(--color-surface-0)'
                 : 'var(--color-text-muted)',
               border: 'none',

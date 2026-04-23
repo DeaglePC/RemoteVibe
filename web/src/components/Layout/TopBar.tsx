@@ -39,7 +39,11 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [pendingWorkDir, setPendingWorkDir] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState('');
+
+  // “下次新建会话的默认模型”，统一放在 chatStore。
+  // 聊天齿轮 action sheet 和 Session Picker 读写的是同一个值。
+  const defaultModel = useChatStore((s) => s.defaultModel);
+  const setDefaultModel = useChatStore((s) => s.setDefaultModel);
 
   const activeAgent = agents.find((a) => a.id === activeAgentId) || agents[0];
   const isRunning = agentStatus === 'running';
@@ -108,7 +112,7 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
     setPendingWorkDir(null);
     if (activeAgent) {
       useChatStore.getState().createSession(activeAgent.id, path);
-      onStartAgent(activeAgent.id, path, selectedModel ? { model: selectedModel } : undefined);
+      onStartAgent(activeAgent.id, path, defaultModel ? { model: defaultModel } : undefined);
       recordWorkspace(path);
     }
   };
@@ -834,11 +838,11 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
           workDir={pendingWorkDir}
           agents={agents}
           selectedAgentId={activeAgent?.id || null}
-          selectedModel={selectedModel}
+          selectedModel={defaultModel}
           onAgentChange={(agentId) => {
             useChatStore.getState().setActiveAgentId(agentId);
           }}
-          onModelChange={setSelectedModel}
+          onModelChange={setDefaultModel}
           onNewSession={() => startNewSession(pendingWorkDir)}
           onClose={() => {
             setShowSessionPicker(false);

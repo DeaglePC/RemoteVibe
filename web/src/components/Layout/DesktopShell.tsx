@@ -1,5 +1,5 @@
-import { lazy, Suspense } from 'react';
-import { Allotment } from 'allotment';
+import { lazy, Suspense, useEffect, useRef } from 'react';
+import { Allotment, type AllotmentHandle } from 'allotment';
 import 'allotment/dist/style.css';
 import { useChatStore } from '../../stores/chatStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -16,6 +16,11 @@ import MainHeader from './MainHeader';
 // 懒加载：仅当 showACPLogs=true 时才用到，避免调试面板进入首屏 bundle
 const ACPLogPanel = lazy(() => import('../Debug/ACPLogPanel'));
 
+// 文件面板默认宽度（仅文件树）
+const FILE_PANE_DEFAULT_WIDTH = 420;
+// 文件面板在打开预览时的期望宽度（文件树 + 预览）
+const FILE_PANE_WITH_PREVIEW_WIDTH = 720;
+
 interface Props {
   /** 由 App 层透传的回调：启动 Agent（点击 Sidebar 新建会话时调用） */
   onStartAgent: (
@@ -26,6 +31,7 @@ interface Props {
   onStopAgent: (agentId: string) => void;
   onSendPrompt: (text: string) => void;
   onSlashCommand: (commandId: string) => void;
+  onOpenModelSheet?: () => void;
   onCancel: () => void;
   onReconnectSession: () => void;
   onPermissionRespond: (requestId: unknown, optionId: string) => void;
@@ -44,16 +50,16 @@ interface Props {
 /**
  * 桌面端整体布局壳（方案 §4.1）：
  *
- * ┌──┬─────────────┬──────────────┬────────────┐
- * │Ac│             │              │            │
- * │ti│  Sidebar    │     Main     │ Right Pane │
- * │vi│  (220px)    │   (flex-1)   │  (380px)   │
- * │ty│             │              │            │
- * └──┴─────────────┴──────────────┴────────────┘
+ * ┌──┬─────────────┬────────────┬──────────────┐
+ * │Ac│             │            │              │
+ * │ti│  Sidebar    │ File Pane  │     Main     │
+ * │vi│  (220px)    │  (420px)   │   (flex-1)   │
+ * │ty│             │            │              │
+ * └──┴─────────────┴────────────┴──────────────┘
  *
  * 关键点：
  *  - ActivityBar / Sidebar 不走 Allotment，是独立 flex 子元素（方案 §10 风险提示）
- *  - Allotment 只管 Main + RightPane 的水平分割（Q2=A：保留可拖）
+ *  - Allotment 只管 FilePane + Main 的水平分割（文件面板位于聊天窗口左侧）
  *  - Main 内再用竖向 Allotment 管 Chat 和 ACPLog 的可选分割
  */
 export default function DesktopShell({
@@ -61,6 +67,7 @@ export default function DesktopShell({
   onStopAgent,
   onSendPrompt,
   onSlashCommand,
+  onOpenModelSheet,
   onCancel,
   onReconnectSession,
   onPermissionRespond,
@@ -71,6 +78,7 @@ export default function DesktopShell({
   const isThinking = useChatStore((s) => s.isAgentThinking);
   const agentStatus = useChatStore((s) => s.agentStatus);
   const showACPLogs = useChatStore((s) => s.showACPLogs);
+  const viewingFile = useChatStore((s) => s.viewingFile);
 
   const rightPaneOpen = useUIStore((s) => s.rightPaneOpen);
 
@@ -78,6 +86,25 @@ export default function DesktopShell({
 
   // PC 端进入聊天主壳时，按用户偏好自动恢复 Agent 会话（每 session 仅一次）
   useAutoReconnect(onReconnectSession);
+
+  // 外层（FilePane + Main）水平 Allotment 的 handle：用于在打开/关闭文件预览时主动调整文件面板宽度
+  const outerAllotmentRef = useRef<AllotmentHandle>(null);
+
+  // 当 viewingFile 从无到有：扩宽文件面板；从有到无：恢复默认宽度（仅当文件面板本身开启时）
+  useEffect(() => {
+    if (!rightPaneOpen) {
+      return;
+    }
+    const container = outerAllotmentRef.current;
+    if (!container) {
+      return;
+    }
+    const targetFilePaneWidth = viewingFile
+      ? FILE_PANE_WITH_PREVIEW_WIDTH
+      : FILE_PANE_DEFAULT_WIDTH;
+    // Main 区域用较大的 sentinel 值，Allotment 会按 minSize/maxSize 自行裁剪并把剩余空间分给它
+    container.resize([targetFilePaneWidth, Number.MAX_SAFE_INTEGER]);
+  }, [viewingFile, rightPaneOpen]);
 
   return (
     <div
@@ -101,14 +128,25 @@ export default function DesktopShell({
         hideHeader
       />
 
-      {/* 主体：ActivityBar + Sidebar + (Main | RightPane) */}
+      {/* 主体：ActivityBar + Sidebar + (FilePane | Main) */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <SlimActivityBar />
         <DesktopSidebar onNewSession={() => onLaunch()} />
 
-        {/* 主区 + 右侧 Pane：用 Allotment 可拖分割 */}
+        {/* 文件 Pane + 主区：用 Allotment 可拖分割（文件 Pane 置于聊天窗口左侧） */}
         <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-          <Allotment proportionalLayout={false}>
+          <Allotment ref={outerAllotmentRef} proportionalLayout={false}>
+            {/* 文件 Pane（位于聊天区左侧） */}
+            {rightPaneOpen && (
+              <Allotment.Pane
+                minSize={280}
+                preferredSize={FILE_PANE_DEFAULT_WIDTH}
+                maxSize={1000}
+              >
+                <RightPane onSendWS={onSendWS} />
+              </Allotment.Pane>
+            )}
+
             {/* 主区 */}
             <Allotment.Pane minSize={360}>
               <div
@@ -142,6 +180,7 @@ export default function DesktopShell({
                         <InputBar
                           onSend={onSendPrompt}
                           onSlashCommand={onSlashCommand}
+                          onOpenModelSheet={onOpenModelSheet}
                           disabled={!isAgentRunning}
                           isThinking={isThinking}
                           onCancel={onCancel}
@@ -159,13 +198,6 @@ export default function DesktopShell({
                 </div>
               </div>
             </Allotment.Pane>
-
-            {/* 右侧 Pane */}
-            {rightPaneOpen && (
-              <Allotment.Pane minSize={280} preferredSize={380} maxSize={640}>
-                <RightPane onSendWS={onSendWS} />
-              </Allotment.Pane>
-            )}
           </Allotment>
         </div>
       </div>

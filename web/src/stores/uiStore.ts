@@ -28,13 +28,13 @@ export type MobileTab = 'sessions' | 'settings';
  * 每一项对应一个 L2/L3 页面，并携带所需参数，以防组件串参。
  *  - `chat`：会话聊天页，携带 sessionId
  *  - `files`：文件树页，携带 rootPath（默认取当前 activeWorkDir）
- *  - `file-viewer`：文件查看器，携带 path + name
+ *  - `file-viewer`：文件查看器，携带 path + name (+ size)
  *  - `settings-detail`：设置子页，携带 pageId
  */
 export type MobilePage =
   | { type: 'chat'; sessionId: string }
   | { type: 'files'; rootPath: string }
-  | { type: 'file-viewer'; path: string; name: string }
+  | { type: 'file-viewer'; path: string; name: string; size?: number }
   | { type: 'settings-detail'; pageId: 'theme' | 'backend' | 'about' };
 
 interface UIState {

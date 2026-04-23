@@ -73,6 +73,18 @@ interface PersistedData {
 const STORAGE_VERSION = 1;
 const MAX_HISTORY_SESSIONS = 50; // 最多保留的历史会话数量
 
+// 下次新建会话默认使用的 model。和 activeModel（运行时快照）分离，
+// 单独存 localStorage，避免和会话序列化耦合。
+const DEFAULT_MODEL_KEY = 'remotevibe.defaultModel';
+
+function loadDefaultModel(): string {
+  try {
+    return window.localStorage.getItem(DEFAULT_MODEL_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
 // ==================== Store Types ====================
 
 interface ChatState {
@@ -108,13 +120,18 @@ interface ChatState {
   activeModel: string | null;
   setActiveModel: (model: string | null) => void;
 
+  // Default model for the next new session (chosen via chat input gear action sheet).
+  // 持久化到 localStorage，只影响下次新建会话、不会改变当前会话。
+  defaultModel: string;
+  setDefaultModel: (model: string) => void;
+
   // File browser visibility
   showFileBrowser: boolean;
   setShowFileBrowser: (show: boolean) => void;
 
   // File viewer state
-  viewingFile: { path: string; name: string } | null;
-  setViewingFile: (file: { path: string; name: string } | null) => void;
+  viewingFile: { path: string; name: string; size?: number } | null;
+  setViewingFile: (file: { path: string; name: string; size?: number } | null) => void;
 
   // Gemini CLI native sessions
   geminiSessions: GeminiSessionInfo[];
@@ -587,6 +604,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveModel: (model) => {
     set({ activeModel: model });
     saveCurrentAndPersist(get());
+  },
+
+  // Default model for the next new session
+  defaultModel: loadDefaultModel(),
+  setDefaultModel: (model) => {
+    set({ defaultModel: model });
+    try {
+      if (model) {
+        window.localStorage.setItem(DEFAULT_MODEL_KEY, model);
+      } else {
+        window.localStorage.removeItem(DEFAULT_MODEL_KEY);
+      }
+    } catch {
+      // localStorage 不可用时静默忽略
+    }
   },
 
   // File browser

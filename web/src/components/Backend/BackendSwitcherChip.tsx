@@ -210,7 +210,6 @@ export default function BackendSwitcherChip({ compact = false, onManage }: Props
           {backends.map((b) => {
             const isActive = b.id === activeBackendId;
             const st = statusMap[b.id]?.state;
-            const color = getStatusColor(st);
             const latency = statusMap[b.id]?.latencyMs;
             return (
               <button
@@ -221,7 +220,6 @@ export default function BackendSwitcherChip({ compact = false, onManage }: Props
                   appearance: 'none',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
                   width: '100%',
                   minHeight: isMobile ? 56 : undefined,
                   padding: isMobile ? '10px 12px' : '8px 10px',
@@ -239,16 +237,6 @@ export default function BackendSwitcherChip({ compact = false, onManage }: Props
                   if (!isActive) e.currentTarget.style.background = 'transparent';
                 }}
               >
-                <span
-                  aria-hidden
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: color,
-                    flexShrink: 0,
-                  }}
-                />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{

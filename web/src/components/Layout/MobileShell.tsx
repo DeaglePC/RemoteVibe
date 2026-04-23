@@ -30,6 +30,7 @@ interface Props {
   onStopAgent: (agentId: string) => void;
   onSendPrompt: (text: string) => void;
   onSlashCommand: (commandId: string) => void;
+  onOpenModelSheet?: () => void;
   onCancel: () => void;
   onReconnectSession: () => void;
   onPermissionRespond: (requestId: unknown, optionId: string) => void;
@@ -45,6 +46,7 @@ export default function MobileShell({
   onStopAgent,
   onSendPrompt,
   onSlashCommand,
+  onOpenModelSheet,
   onCancel,
   onReconnectSession,
   onPermissionRespond,
@@ -107,6 +109,7 @@ export default function MobileShell({
           {renderPage(page, {
             onSendPrompt,
             onSlashCommand,
+            onOpenModelSheet,
             onCancel,
             onReconnectSession,
             onPermissionRespond,
@@ -127,6 +130,7 @@ function renderPage(
   handlers: {
     onSendPrompt: (text: string) => void;
     onSlashCommand: (commandId: string) => void;
+    onOpenModelSheet?: () => void;
     onCancel: () => void;
     onReconnectSession: () => void;
     onPermissionRespond: (requestId: unknown, optionId: string) => void;
@@ -139,6 +143,7 @@ function renderPage(
         <ChatPage
           onSendPrompt={handlers.onSendPrompt}
           onSlashCommand={handlers.onSlashCommand}
+          onOpenModelSheet={handlers.onOpenModelSheet}
           onCancel={handlers.onCancel}
           onReconnectSession={handlers.onReconnectSession}
           onPermissionRespond={handlers.onPermissionRespond}
@@ -147,7 +152,7 @@ function renderPage(
     case 'files':
       return <FilesTreePage rootPath={page.rootPath} onSendWS={handlers.onSendWS} />;
     case 'file-viewer':
-      return <FileViewerPage path={page.path} name={page.name} />;
+      return <FileViewerPage path={page.path} name={page.name} size={page.size} />;
     case 'settings-detail':
       // P4 MVP 暂不使用这个栈帧（SettingsRoot 自己管子页）
       // 保留类型定义供后续扩展

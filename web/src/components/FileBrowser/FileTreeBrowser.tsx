@@ -12,7 +12,7 @@ import { isTextFile } from './FileViewer';
 interface Props {
   rootPath: string;
   onClose: () => void;
-  onFileOpen?: (filePath: string, fileName: string) => void;
+  onFileOpen?: (filePath: string, fileName: string, fileSize?: number) => void;
   /** 发送 WebSocket 消息（用于 watch_dir） */
   onSendWS?: (msg: { type: string; payload: unknown }) => void;
 }
@@ -238,8 +238,9 @@ export default function FileTreeBrowser({ rootPath, onClose, onFileOpen, onSendW
   const handleNodeClick = useCallback((node: TreeNode) => {
     if (node.isDir) {
       toggleExpand(node.fullPath);
-    } else if (onFileOpen && isTextFile(node.name)) {
-      onFileOpen(node.fullPath, node.name);
+    } else if (onFileOpen) {
+      // 二进制文件由 FileViewer 接管展示“不可预览”提示，这里不再拦截点击
+      onFileOpen(node.fullPath, node.name, node.size);
     }
   }, [toggleExpand, onFileOpen]);
 
@@ -420,20 +421,26 @@ function TreeNodeItem({
   node: TreeNode;
   onNodeClick: (node: TreeNode) => void;
 }) {
-  const canOpen = !node.isDir && isTextFile(node.name);
+  const canPreview = !node.isDir && isTextFile(node.name);
   const indent = node.depth * 16 + 8; // px
+  const tooltip = node.isDir
+    ? node.name
+    : canPreview
+      ? node.name
+      : `${node.name} \u00b7 \u4e8c\u8fdb\u5236\u6587\u4ef6\uff0c\u4e0d\u53ef\u9884\u89c8`;
 
   return (
     <>
       <button
         onClick={() => onNodeClick(node)}
+        title={tooltip}
         className="mx-2 my-0.5 w-[calc(100%-1rem)] flex items-center gap-2 rounded-xl py-2.5 pr-3 text-left transition-colors duration-100 cursor-pointer group sm:mx-0 sm:my-0 sm:w-full sm:rounded-none sm:py-1"
         style={{
           paddingLeft: `${indent}px`,
           background: 'transparent',
           border: 'none',
-          opacity: !node.isDir && !canOpen ? 0.4 : 1,
-          cursor: !node.isDir && !canOpen ? 'default' : 'pointer',
+          opacity: !node.isDir && !canPreview ? 0.55 : 1,
+          cursor: 'pointer',
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = 'var(--color-surface-2)';
@@ -465,18 +472,12 @@ function TreeNodeItem({
             style={{
               color: node.isDir
                 ? 'var(--color-text-primary)'
-                : canOpen
+                : canPreview
                   ? 'var(--color-text-secondary)'
                   : 'var(--color-text-muted)',
             }}
           >
             {node.name}
-          </span>
-          <span
-            className="mt-0.5 block text-[10px] uppercase tracking-[0.18em] sm:hidden"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            {node.isDir ? 'Folder' : canOpen ? 'Preview' : 'Binary'}
           </span>
         </div>
       </button>

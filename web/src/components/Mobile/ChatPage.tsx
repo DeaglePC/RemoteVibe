@@ -26,6 +26,7 @@ import HeaderMetrics from '../Layout/HeaderMetrics';
 interface Props {
   onSendPrompt: (text: string) => void;
   onSlashCommand: (commandId: string) => void;
+  onOpenModelSheet?: () => void;
   onCancel: () => void;
   onReconnectSession: () => void;
   onPermissionRespond: (requestId: unknown, optionId: string) => void;
@@ -34,6 +35,7 @@ interface Props {
 export default function ChatPage({
   onSendPrompt,
   onSlashCommand,
+  onOpenModelSheet,
   onCancel,
   onReconnectSession,
   onPermissionRespond,
@@ -125,6 +127,7 @@ export default function ChatPage({
         <InputBar
           onSend={onSendPrompt}
           onSlashCommand={onSlashCommand}
+          onOpenModelSheet={onOpenModelSheet}
           disabled={!isAgentRunning}
           isThinking={isThinking}
           onCancel={onCancel}

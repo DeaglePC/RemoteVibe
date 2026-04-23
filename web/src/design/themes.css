@@ -71,10 +71,27 @@
   /* 浅色下品牌主色适度加深以保证按钮对比度 */
   --color-brand-500: oklch(0.50 0.22 270);
   --color-brand-600: oklch(0.43 0.24 270);
-  --color-accent-500: oklch(0.60 0.18 195);
-  --color-accent-600: oklch(0.52 0.16 195);
+  /*
+   * Accent（电青）在浅色下必须加深，否则 0.80 亮度的青色在白底 / 浅灰底上对比度严重不足，
+   * 最典型的是 markdown 行内代码（.markdown-body code 使用 --color-accent-400 作为字色）。
+   * 这里把 400/500/600 全部压低一个明度档位，保证 WCAG AA。
+   */
+  --color-accent-400: oklch(0.52 0.16 195);
+  --color-accent-500: oklch(0.45 0.17 195);
+  --color-accent-600: oklch(0.38 0.15 195);
 
   --theme-meta-color: #ffffff;
+}
+
+/*
+ * 浅色主题下的 markdown 行内代码覆写。
+ * 深色主题保持原青色（在深底上美观且有辨识度）；
+ * 浅色主题改用中性深色文字 + 更浅柔底色，避免青绿在浅灰底上观感发脏。
+ * 对齐 GitHub Light / VSCode Light / Notion Light 的处理习惯。
+ */
+:root[data-theme="light"] .markdown-body code {
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
 }
 
 /* ==================== Auto（跟随系统） ====================
@@ -115,8 +132,9 @@
 
     --color-brand-500: oklch(0.50 0.22 270);
     --color-brand-600: oklch(0.43 0.24 270);
-    --color-accent-500: oklch(0.60 0.18 195);
-    --color-accent-600: oklch(0.52 0.16 195);
+    --color-accent-400: oklch(0.52 0.16 195);
+    --color-accent-500: oklch(0.45 0.17 195);
+    --color-accent-600: oklch(0.38 0.15 195);
 
     --theme-meta-color: #ffffff;
   }

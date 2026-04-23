@@ -16,7 +16,7 @@ interface Props {
   rootPath: string;
   onClose: () => void;
   /** 点击可预览的文件时触发 */
-  onFileOpen?: (filePath: string, fileName: string) => void;
+  onFileOpen?: (filePath: string, fileName: string, fileSize?: number) => void;
 }
 
 export default function FileBrowser({ rootPath, onClose, onFileOpen }: Props) {
@@ -88,12 +88,12 @@ export default function FileBrowser({ rootPath, onClose, onFileOpen }: Props) {
       fetchFiles(newPath);
       return;
     }
-    // 文本文件支持点击打开预览
-    if (onFileOpen && isTextFile(entry.name)) {
+    // 点击文件触发预览（二进制 / 大文件由 FileViewer 统一展示提示）
+    if (onFileOpen) {
       const filePath = currentPath.endsWith('/')
         ? `${currentPath}${entry.name}`
         : `${currentPath}/${entry.name}`;
-      onFileOpen(filePath, entry.name);
+      onFileOpen(filePath, entry.name, entry.size);
     }
   };
 

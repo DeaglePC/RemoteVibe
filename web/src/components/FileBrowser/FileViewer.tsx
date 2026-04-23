@@ -1,9 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { getApiBaseUrl, getAuthHeaders } from '../../stores/backendStore';
 import {
   X, FileCode, FileText, FileImage, Database, Terminal,
-  Lock, LayoutTemplate, Copy, Check, ArrowLeft,
+  Lock, LayoutTemplate, Copy, Check, ArrowLeft, FileWarning, Ban,
 } from 'lucide-react';
+
+/** 文件预览大小上限：与后端保持一致（server/internal/gateway/server.go:handleFileContent） */
+const MAX_PREVIEW_SIZE = 2 * 1024 * 1024; // 2 MB
 
 interface Props {
   filePath: string;
@@ -11,6 +16,8 @@ interface Props {
   onClose: () => void;
   /** 在手机模式下是否全屏 */
   isMobile?: boolean;
+  /** 文件字节大小（若已知，可用于提前判断是否过大） */
+  fileSize?: number;
 }
 
 /** 文本文件最大支持的文件扩展名 */
@@ -37,6 +44,14 @@ export function isTextFile(fileName: string): boolean {
     return true;
   }
   return TEXT_EXTENSIONS.has(ext);
+}
+
+/** 人类可读的文件大小 */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 /** 获取语言标识用于语法高亮 */
@@ -83,13 +98,22 @@ function getFileIcon(name: string) {
   }
 }
 
-export default function FileViewer({ filePath, fileName, onClose, isMobile }: Props) {
+export default function FileViewer({ filePath, fileName, onClose, isMobile, fileSize }: Props) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const language = getLanguage(fileName);
+
+  // 预览前的静态拦截：二进制文件 / 过大文件
+  const isBinary = !isTextFile(fileName);
+  const tooLarge = typeof fileSize === 'number' && fileSize > MAX_PREVIEW_SIZE;
+  const blockKind: 'binary' | 'too-large' | null = isBinary
+    ? 'binary'
+    : tooLarge
+      ? 'too-large'
+      : null;
 
   const fetchContent = useCallback(async () => {
     setLoading(true);
@@ -113,8 +137,15 @@ export default function FileViewer({ filePath, fileName, onClose, isMobile }: Pr
   }, [filePath]);
 
   useEffect(() => {
+    // 被静态拦截时直接跳过请求
+    if (blockKind !== null) {
+      setLoading(false);
+      setError(null);
+      setContent(null);
+      return;
+    }
     fetchContent();
-  }, [fetchContent]);
+  }, [fetchContent, blockKind]);
 
   const handleCopy = async () => {
     if (content) {
@@ -126,7 +157,6 @@ export default function FileViewer({ filePath, fileName, onClose, isMobile }: Pr
 
   const lines = content?.split('\n') || [];
   const lineCount = lines.length;
-  const lineNumWidth = Math.max(String(lineCount).length * 0.6 + 1, 2.5);
   const fileDirectory = filePath.replace(/\/[^/]+$/, '') || '/';
 
   return (
@@ -235,46 +265,105 @@ export default function FileViewer({ filePath, fileName, onClose, isMobile }: Pr
           </div>
         )}
 
-        {error && (
-          <div className="m-4 p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-center flex flex-col items-center gap-2">
-            <X size={24} className="text-red-400" />
-            <span className="text-sm text-red-400">{error}</span>
+        {/* 二进制文件：禁止预览（仿 VSCode） */}
+        {!loading && blockKind === 'binary' && (
+          <div className="flex flex-col items-center justify-center h-full px-6 py-16 text-center gap-3">
+            <div
+              className="p-4 rounded-full"
+              style={{ background: 'var(--color-surface-2)' }}
+            >
+              <Ban size={28} className="text-[var(--color-text-muted)]" />
+            </div>
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              该文件是二进制文件，无法预览
+            </div>
+            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              {fileName}
+              {typeof fileSize === 'number' && ` · ${formatBytes(fileSize)}`}
+            </div>
           </div>
         )}
 
-        {!loading && !error && content !== null && (
-          <div className="flex text-xs font-mono leading-relaxed">
-            {/* Line numbers */}
+        {/* 过大文件：静态拦截（未请求） */}
+        {!loading && blockKind === 'too-large' && (
+          <div className="flex flex-col items-center justify-center h-full px-6 py-16 text-center gap-3">
             <div
-              className="flex-shrink-0 text-right select-none py-3 sticky left-0"
-              style={{
-                width: `${lineNumWidth}rem`,
-                color: 'var(--color-text-muted)',
-                background: 'var(--color-surface-1)',
-                borderRight: '1px solid var(--color-border)',
-                paddingRight: '0.5rem',
-              }}
+              className="p-4 rounded-full"
+              style={{ background: 'var(--color-surface-2)' }}
             >
-              {lines.map((_, i) => (
-                <div key={i} className="px-2" style={{ lineHeight: '1.65' }}>
-                  {i + 1}
-                </div>
-              ))}
+              <FileWarning size={28} className="text-amber-400" />
             </div>
-
-            {/* Code content */}
-            <pre
-              className="flex-1 py-3 px-4 m-0 overflow-x-auto"
-              style={{
-                color: 'var(--color-text-secondary)',
-                lineHeight: '1.65',
-                tabSize: 2,
-                background: 'transparent',
-              }}
-            >
-              {content}
-            </pre>
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              文件过大，无法预览
+            </div>
+            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              {fileName}
+              {typeof fileSize === 'number' && ` · ${formatBytes(fileSize)}`}
+              {` · 上限 ${formatBytes(MAX_PREVIEW_SIZE)}`}
+            </div>
           </div>
+        )}
+
+        {/* 其它错误（例如后端返回 file too large 兜底） */}
+        {!loading && blockKind === null && error && (
+          (() => {
+            const isSizeErr = /file too large/i.test(error);
+            return (
+              <div className="flex flex-col items-center justify-center h-full px-6 py-16 text-center gap-3">
+                <div
+                  className="p-4 rounded-full"
+                  style={{ background: 'var(--color-surface-2)' }}
+                >
+                  {isSizeErr
+                    ? <FileWarning size={28} className="text-amber-400" />
+                    : <X size={28} className="text-red-400" />}
+                </div>
+                <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                  {isSizeErr ? '文件过大，无法预览' : '无法打开文件'}
+                </div>
+                <div
+                  className="text-xs break-all max-w-md"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  {error}
+                </div>
+              </div>
+            );
+          })()
+        )}
+
+        {!loading && !error && blockKind === null && content !== null && (
+          <SyntaxHighlighter
+            language={language}
+            style={oneDark}
+            showLineNumbers
+            wrapLongLines={false}
+            customStyle={{
+              margin: 0,
+              padding: '0.75rem 0',
+              background: 'var(--color-surface-0)',
+              fontSize: '0.75rem',
+              lineHeight: '1.65',
+              minHeight: '100%',
+            }}
+            codeTagProps={{
+              style: {
+                fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
+                tabSize: 2,
+              },
+            }}
+            lineNumberStyle={{
+              minWidth: '2.5em',
+              paddingRight: '1em',
+              color: 'var(--color-text-muted)',
+              borderRight: '1px solid var(--color-border)',
+              marginRight: '1em',
+              userSelect: 'none',
+              textAlign: 'right',
+            }}
+          >
+            {content}
+          </SyntaxHighlighter>
         )}
       </div>
     </div>

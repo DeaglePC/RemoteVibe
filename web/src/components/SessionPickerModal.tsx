@@ -1,12 +1,6 @@
 import type { AgentInfo } from '../types/protocol';
-
-/** Gemini CLI 可用模型列表 */
-const GEMINI_MODELS = [
-  { id: '', label: 'Default', desc: 'Use CLI default model' },
-  { id: 'gemini-2.5-pro', label: '2.5 Pro', desc: 'Most capable' },
-  { id: 'gemini-2.5-flash', label: '2.5 Flash', desc: 'Fast & balanced' },
-  { id: 'gemini-2.5-flash-lite', label: '2.5 Flash Lite', desc: 'Fastest & cheapest' },
-];
+import { inferAgentKind } from '../types/protocol';
+import { getModelsForKind } from '../types/models';
 
 interface Props {
   open: boolean;
@@ -40,8 +34,9 @@ export default function SessionPickerModal({
   const folderName = workDir.split('/').pop() || workDir;
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
-  // Gemini 相关的 agent（ACP 或 CLI 模式）支持模型切换
-  const isGeminiAgent = selectedAgent?.id === 'gemini' || selectedAgent?.id === 'gemini-cli';
+  // 根据当前选中 agent 推断 kind，获取对应模型列表；无模型时隐藏列区
+  const agentKind = inferAgentKind(selectedAgent?.id);
+  const availableModels = getModelsForKind(agentKind);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -190,19 +185,19 @@ export default function SessionPickerModal({
             </div>
           </div>
 
-          {/* Model Selector — 仅 Gemini agent 显示 */}
-          {isGeminiAgent && (
+          {/* Model Selector — 根据当前 agent 展示对应的模型列表 */}
+          {availableModels.length > 0 && (
             <div className="px-3 sm:px-4 pt-1">
               <div className="px-1 pb-1 text-xs font-medium uppercase tracking-wider"
                 style={{ color: 'var(--color-text-muted)' }}>
                 🤖 Model
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {GEMINI_MODELS.map((m) => {
+                {availableModels.map((m) => {
                   const isActive = selectedModel === m.id;
                   return (
                     <button
-                      key={m.id}
+                      key={m.id || '__default__'}
                       onClick={() => onModelChange(m.id)}
                       className="px-2.5 py-1.5 rounded-lg text-xs transition-all duration-150 cursor-pointer"
                       style={{
@@ -213,7 +208,7 @@ export default function SessionPickerModal({
                         color: isActive ? 'var(--color-accent-400)' : 'var(--color-text-secondary)',
                         fontWeight: isActive ? 600 : 400,
                       }}
-                      title={m.desc}
+                      title={m.desc || m.id || 'Use CLI default model'}
                     >
                       {m.label}
                     </button>
