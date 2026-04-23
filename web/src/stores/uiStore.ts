@@ -81,6 +81,15 @@ interface UIState {
   autoReconnectOnOpen: boolean;
   setAutoReconnectOnOpen: (v: boolean) => void;
 
+  /**
+   * 终端模式：开启后聊天窗口切换为 TerminalView（基于 xterm.js 的真实 PTY 终端），
+   * 通过 /ws/terminal 与后端长驻 shell 进程双向透传字节流。
+   * 仅内存态，不持久化：刷新页面回到聊天模式。
+   */
+  terminalMode: boolean;
+  setTerminalMode: (v: boolean) => void;
+  toggleTerminalMode: () => void;
+
   // ==================== 手机端导航（P4） ====================
 
   /** 手机端底部当前活跃 Tab */
@@ -256,6 +265,10 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ autoReconnectOnOpen: v });
     persistUI(get().shellFlavor, get().sidebarCollapsed, v, get().sidebarWidth);
   },
+
+  terminalMode: false,
+  setTerminalMode: (v) => set({ terminalMode: v }),
+  toggleTerminalMode: () => set((state) => ({ terminalMode: !state.terminalMode })),
 
   // ==================== 手机端导航（P4） ====================
 

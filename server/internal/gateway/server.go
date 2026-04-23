@@ -101,6 +101,9 @@ func NewServer(cfg *config.Config, mgr *agent.Manager) *Server {
 	mux.HandleFunc("/api/gemini-sessions", s.handleGeminiSessions)
 	mux.HandleFunc("/api/gemini-session-messages", s.handleGeminiSessionMessages)
 	mux.HandleFunc("/ws", s.handleWebSocket)
+	// /ws/terminal 提供终端模式下的 shell 命令执行（流式输出）。
+	// 与 /ws 一样需要经过 corsMiddleware + authMiddleware（token 鉴权）保护。
+	mux.HandleFunc("/ws/terminal", s.handleTerminalWebSocket)
 
 	s.httpSrv = &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),

@@ -8,6 +8,7 @@ import ActivityBar from './components/Layout/ActivityBar';
 import ChatView from './components/ChatView/ChatView';
 import ChatRuntimeStrip from './components/ChatView/ChatRuntimeStrip';
 import InputBar from './components/ChatView/InputBar';
+import TerminalView from './components/ChatView/TerminalView';
 import FileTreeBrowser from './components/FileBrowser/FileTreeBrowser';
 import FileViewer from './components/FileBrowser/FileViewer';
 import SimpleToast from './components/Toast/SimpleToast';
@@ -315,6 +316,8 @@ export default function App() {
   const shellFlavor = useUIStore((s) => s.shellFlavor);
   const commandPaletteOpen = useUIStore((s) => s.commandPaletteOpen);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
+  // 终端模式：classic 布局下也要根据该开关切换聊天 / 终端视图
+  const terminalMode = useUIStore((s) => s.terminalMode);
 
   // 构建命令面板命令集：新建会话转发给 handleLaunch；停止 Agent 转发给 handleStop
   const commands = useBuiltinCommands({
@@ -403,16 +406,22 @@ export default function App() {
           )}
           {!fileBrowserVisible && !viewingFile && (
             <div className="flex flex-col flex-1 min-w-0">
-              <ChatRuntimeStrip onReconnectSession={handleReconnectSession} />
-              <ChatView onPermissionRespond={handlePermissionRespond} />
-              <InputBar
-                onSend={handleSendPrompt}
-                onSlashCommand={handleSlashCommand}
-                onOpenModelSheet={handleOpenModelSheet}
-                disabled={!isAgentRunning}
-                isThinking={isThinking}
-                onCancel={handleCancel}
-              />
+              {terminalMode ? (
+                <TerminalView cwd={activeWorkDir} />
+              ) : (
+                <>
+                  <ChatRuntimeStrip onReconnectSession={handleReconnectSession} />
+                  <ChatView onPermissionRespond={handlePermissionRespond} />
+                  <InputBar
+                    onSend={handleSendPrompt}
+                    onSlashCommand={handleSlashCommand}
+                    onOpenModelSheet={handleOpenModelSheet}
+                    disabled={!isAgentRunning}
+                    isThinking={isThinking}
+                    onCancel={handleCancel}
+                  />
+                </>
+              )}
             </div>
           )}
         </div>
@@ -482,16 +491,22 @@ export default function App() {
                   {/* 聊天 + 输入框 */}
                   <Allotment.Pane minSize={200}>
                     <div className="flex flex-col h-full min-w-0">
-                      <ChatRuntimeStrip onReconnectSession={handleReconnectSession} />
-                      <ChatView onPermissionRespond={handlePermissionRespond} />
-                      <InputBar
-                        onSend={handleSendPrompt}
-                        onSlashCommand={handleSlashCommand}
-                        onOpenModelSheet={handleOpenModelSheet}
-                        disabled={!isAgentRunning}
-                        isThinking={isThinking}
-                        onCancel={handleCancel}
-                      />
+                      {terminalMode ? (
+                        <TerminalView cwd={activeWorkDir} />
+                      ) : (
+                        <>
+                          <ChatRuntimeStrip onReconnectSession={handleReconnectSession} />
+                          <ChatView onPermissionRespond={handlePermissionRespond} />
+                          <InputBar
+                            onSend={handleSendPrompt}
+                            onSlashCommand={handleSlashCommand}
+                            onOpenModelSheet={handleOpenModelSheet}
+                            disabled={!isAgentRunning}
+                            isThinking={isThinking}
+                            onCancel={handleCancel}
+                          />
+                        </>
+                      )}
                     </div>
                   </Allotment.Pane>
 

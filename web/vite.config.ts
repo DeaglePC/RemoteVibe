@@ -53,6 +53,12 @@ export default defineConfig({
         target: 'http://localhost:3710',
         ws: true,
       },
+      // 显式声明 /ws/terminal 的 WebSocket 代理，避免 Vite 前缀匹配对
+      // 带子路径的 ws 升级处理不一致导致连接卡在 CONNECTING。
+      '/ws/terminal': {
+        target: 'http://localhost:3710',
+        ws: true,
+      },
       '/api': {
         target: 'http://localhost:3710',
       },

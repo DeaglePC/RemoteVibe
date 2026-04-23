@@ -6,6 +6,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { useAutoReconnect } from '../../hooks/useAutoReconnect';
 import ChatView from '../ChatView/ChatView';
 import InputBar from '../ChatView/InputBar';
+import TerminalView from '../ChatView/TerminalView';
 import { ActivityBadge } from '../ChatView/ChatRuntimeStrip';
 import TopBar from './TopBar';
 import SlimActivityBar from './SlimActivityBar';
@@ -79,8 +80,10 @@ export default function DesktopShell({
   const agentStatus = useChatStore((s) => s.agentStatus);
   const showACPLogs = useChatStore((s) => s.showACPLogs);
   const viewingFile = useChatStore((s) => s.viewingFile);
+  const activeWorkDir = useChatStore((s) => s.activeWorkDir);
 
   const rightPaneOpen = useUIStore((s) => s.rightPaneOpen);
+  const terminalMode = useUIStore((s) => s.terminalMode);
 
   const isAgentRunning = agentStatus === 'running';
 
@@ -164,27 +167,33 @@ export default function DesktopShell({
                   <Allotment vertical proportionalLayout={false}>
                     <Allotment.Pane minSize={200}>
                       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-                        <ChatView onPermissionRespond={onPermissionRespond} />
-                        {/* 输入框左上方的 Activity 徽标（Thinking / Using tools…），仅忙碌时占位 */}
-                        <div
-                          style={{
-                            flexShrink: 0,
-                            minHeight: 18,
-                            padding: '2px 14px 0',
-                            display: 'flex',
-                            alignItems: 'center',
-                          }}
-                        >
-                          <ActivityBadge />
-                        </div>
-                        <InputBar
-                          onSend={onSendPrompt}
-                          onSlashCommand={onSlashCommand}
-                          onOpenModelSheet={onOpenModelSheet}
-                          disabled={!isAgentRunning}
-                          isThinking={isThinking}
-                          onCancel={onCancel}
-                        />
+                        {terminalMode ? (
+                          <TerminalView cwd={activeWorkDir} />
+                        ) : (
+                          <>
+                            <ChatView onPermissionRespond={onPermissionRespond} />
+                            {/* 输入框左上方的 Activity 徽标（Thinking / Using tools…），仅忙碌时占位 */}
+                            <div
+                              style={{
+                                flexShrink: 0,
+                                minHeight: 18,
+                                padding: '2px 14px 0',
+                                display: 'flex',
+                                alignItems: 'center',
+                              }}
+                            >
+                              <ActivityBadge />
+                            </div>
+                            <InputBar
+                              onSend={onSendPrompt}
+                              onSlashCommand={onSlashCommand}
+                              onOpenModelSheet={onOpenModelSheet}
+                              disabled={!isAgentRunning}
+                              isThinking={isThinking}
+                              onCancel={onCancel}
+                            />
+                          </>
+                        )}
                       </div>
                     </Allotment.Pane>
                     {showACPLogs && (

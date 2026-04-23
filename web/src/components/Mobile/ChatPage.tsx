@@ -5,6 +5,7 @@ import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { useAutoReconnect } from '../../hooks/useAutoReconnect';
 import ChatView from '../ChatView/ChatView';
 import InputBar from '../ChatView/InputBar';
+import TerminalView from '../ChatView/TerminalView';
 import { ActivityBadge, ConnectivityBadge } from '../ChatView/ChatRuntimeStrip';
 import MobilePageHeader from '../Layout/MobilePageHeader';
 import HeaderMetrics from '../Layout/HeaderMetrics';
@@ -50,6 +51,7 @@ export default function ChatPage({
 
   const popMobilePage = useUIStore((s) => s.popMobilePage);
   const pushMobilePage = useUIStore((s) => s.pushMobilePage);
+  const terminalMode = useUIStore((s) => s.terminalMode);
 
   const isAgentRunning = agentStatus === 'running';
 
@@ -111,27 +113,33 @@ export default function ChatPage({
           transition: 'padding-bottom var(--duration-fast, 120ms) var(--ease-out, ease-out)',
         }}
       >
-        <ChatView onPermissionRespond={onPermissionRespond} />
-        {/* 输入框左上方：Agent 当前活动徽标（Thinking / Using tools / Responding…） */}
-        <div
-          style={{
-            flexShrink: 0,
-            padding: '2px 16px 0',
-            minHeight: 18,
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <ActivityBadge />
-        </div>
-        <InputBar
-          onSend={onSendPrompt}
-          onSlashCommand={onSlashCommand}
-          onOpenModelSheet={onOpenModelSheet}
-          disabled={!isAgentRunning}
-          isThinking={isThinking}
-          onCancel={onCancel}
-        />
+        {terminalMode ? (
+          <TerminalView cwd={activeWorkDir} />
+        ) : (
+          <>
+            <ChatView onPermissionRespond={onPermissionRespond} />
+            {/* 输入框左上方：Agent 当前活动徽标（Thinking / Using tools / Responding…） */}
+            <div
+              style={{
+                flexShrink: 0,
+                padding: '2px 16px 0',
+                minHeight: 18,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <ActivityBadge />
+            </div>
+            <InputBar
+              onSend={onSendPrompt}
+              onSlashCommand={onSlashCommand}
+              onOpenModelSheet={onOpenModelSheet}
+              disabled={!isAgentRunning}
+              isThinking={isThinking}
+              onCancel={onCancel}
+            />
+          </>
+        )}
       </div>
     </>
   );
