@@ -113,68 +113,6 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
     }
   };
 
-  /** 恢复历史会话并重新启动 agent */
-  const handleRestoreAndStart = (sessionId: string) => {
-    setShowSessionPicker(false);
-    const store = useChatStore.getState();
-    store.restoreSession(sessionId);
-    const session = store.sessions.find((s) => s.id === sessionId);
-    if (session && activeAgent) {
-      onStartAgent(activeAgent.id, session.workDir);
-      recordWorkspace(session.workDir);
-    }
-    setPendingWorkDir(null);
-  };
-
-  /** 恢复 Gemini CLI 原生会话（真正恢复 agent 上下文） */
-  const handleResumeGeminiSession = async (geminiSessionId: string) => {
-    setShowSessionPicker(false);
-    const workDir = pendingWorkDir;
-    if (workDir && activeAgent) {
-      const store = useChatStore.getState();
-      store.createSession(activeAgent.id, workDir, selectedModel || null);
-      store.addMessage({
-        id: `msg_${Date.now()}_resume`,
-        role: 'system',
-        content: `🔄 Resuming Gemini CLI session ${geminiSessionId.slice(0, 8)}...`,
-        timestamp: Date.now(),
-      });
-
-      // 从后端加载 Gemini CLI 原生会话的历史消息
-      try {
-        const url = `${getApiBaseUrl()}/api/gemini-session-messages?workDir=${encodeURIComponent(workDir)}&sessionId=${encodeURIComponent(geminiSessionId)}`;
-        const resp = await fetch(url, { headers: getAuthHeaders() });
-        if (resp.ok) {
-          const data = await resp.json();
-          const msgs = data.messages || [];
-          if (msgs.length > 0) {
-            const now = Date.now();
-            for (let i = 0; i < msgs.length; i++) {
-              store.addMessage({
-                id: `msg_${now}_history_${i}`,
-                role: msgs[i].role === 'user' ? 'user' : 'agent',
-                content: msgs[i].content,
-                timestamp: now - (msgs.length - i) * 1000, // 保持顺序
-              });
-            }
-            store.addMessage({
-              id: `msg_${now}_divider`,
-              role: 'system',
-              content: `── Previous conversation (${msgs.length} messages) ──`,
-              timestamp: now,
-            });
-          }
-        }
-      } catch (err) {
-        console.warn('[TopBar] Failed to load Gemini session messages:', err);
-      }
-
-      onStartAgent(activeAgent.id, workDir, { geminiSessionId, model: selectedModel || undefined });
-      recordWorkspace(workDir);
-    }
-    setPendingWorkDir(null);
-  };
-
   /** 后端连接成功后触发的回调 */
   const handleBackendConnected = () => {
     setShowWorkspacePicker(true);
@@ -889,14 +827,11 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
         onClose={() => setShowWorkspacePicker(false)}
       />
 
-      {/* Session picker - shown after workspace selection if history exists */}
+      {/* Session picker - 选择完工作区后弹出，提供 Agent / Model 选择与新建会话 */}
       {pendingWorkDir && (
         <SessionPickerModal
           open={showSessionPicker}
           workDir={pendingWorkDir}
-          sessions={sessions.filter(
-            (s) => s.workDir === pendingWorkDir && s.messages.length > 0
-          )}
           agents={agents}
           selectedAgentId={activeAgent?.id || null}
           selectedModel={selectedModel}
@@ -904,8 +839,6 @@ export default function TopBar({ onStartAgent, onStopAgent, launchTrigger, hideH
             useChatStore.getState().setActiveAgentId(agentId);
           }}
           onModelChange={setSelectedModel}
-          onRestoreSession={handleRestoreAndStart}
-          onResumeGeminiSession={handleResumeGeminiSession}
           onNewSession={() => startNewSession(pendingWorkDir)}
           onClose={() => {
             setShowSessionPicker(false);
