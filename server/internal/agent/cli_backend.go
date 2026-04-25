@@ -191,9 +191,12 @@ func (b *CLIBackend) buildArgs(prompt string) []string {
 		}
 
 	case "codex":
-		// codex exec "prompt" [--model MODEL]
-		// Args = ["exec"], prompt 作为位置参数追加
-		args = append(args, b.def.Args...)
+		// codex exec [resume <ID>] "prompt" [--model MODEL]
+		if b.turnCount > 1 && b.sessionID != "" {
+			args = append(args, "exec", "resume", b.sessionID)
+		} else {
+			args = append(args, b.def.Args...) // 默认是 "exec"
+		}
 		args = append(args, prompt)
 		if b.model != "" {
 			args = append(args, "--model", b.model)
