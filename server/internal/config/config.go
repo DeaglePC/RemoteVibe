@@ -69,7 +69,7 @@ func Default() *Config {
 				ID:      "codex",
 				Name:    "Codex CLI",
 				Command: "codex",
-				Args:    []string{"--quiet"},
+				Args:    []string{"exec"},
 				Mode:    "cli",
 			},
 			{

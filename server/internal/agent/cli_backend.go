@@ -190,6 +190,15 @@ func (b *CLIBackend) buildArgs(prompt string) []string {
 			args = append(args, "--resume", b.sessionID)
 		}
 
+	case "codex":
+		// codex exec "prompt" [--model MODEL]
+		// Args = ["exec"], prompt 作为位置参数追加
+		args = append(args, b.def.Args...)
+		args = append(args, prompt)
+		if b.model != "" {
+			args = append(args, "--model", b.model)
+		}
+
 	default:
 		// 其他 Agent：直接使用配置的 args
 		args = append(args, b.def.Args...)
@@ -220,13 +229,8 @@ func (b *CLIBackend) writeStdinPrompt(stdin io.WriteCloser, prompt string) {
 		stdin.Close()
 
 	case "codex":
-		// Codex: 通过 stdin 写入纯文本，然后关闭
-		go func() {
-			defer stdin.Close()
-			if _, err := fmt.Fprintln(stdin, prompt); err != nil {
-				log.Printf("[CLIBackend] Failed to write stdin for Codex: %v", err)
-			}
-		}()
+		// codex exec: prompt 已作为命令行参数传入，直接关闭 stdin
+		stdin.Close()
 
 	default:
 		// 默认：通过 stdin 写入纯文本
