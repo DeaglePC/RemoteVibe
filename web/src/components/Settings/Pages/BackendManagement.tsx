@@ -349,6 +349,26 @@ export default function BackendManagement() {
                 {label}
                 {b.apiKey ? ' · 🔑 已配置 Key' : ' · 🔓 无 Key'}
               </div>
+              {status?.agents && status.agents.length > 0 && (
+                <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {status.agents.map(ag => (
+                    <span 
+                      key={ag.id} 
+                      style={{ 
+                        fontSize: 10, 
+                        background: 'var(--color-surface-3)', 
+                        padding: '2px 6px', 
+                        borderRadius: 4,
+                        color: ag.available ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                        border: `1px solid ${ag.available ? 'var(--color-border)' : 'transparent'}`
+                      }}
+                      title={ag.available ? `可用 (${ag.mode} 模式)` : '未安装'}
+                    >
+                      🤖 {ag.name}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* 操作按钮 */}

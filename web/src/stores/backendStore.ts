@@ -303,3 +303,28 @@ export async function pingAllBackends(timeoutMs = 5000): Promise<void> {
   const { backends } = useBackendStore.getState();
   await Promise.all(backends.map((b) => pingBackend(b.id, timeoutMs)));
 }
+
+/**
+ * 动态获取后端指定的 Agent 可用模型。
+ * 针对 OpenCode 等支持 CLI 查询模型列表的 agent。
+ */
+export async function fetchDynamicModels(agentId: string): Promise<string[]> {
+  try {
+    const baseUrl = getApiBaseUrl();
+    const headers = getAuthHeaders();
+    const resp = await fetch(`${baseUrl}/api/agent-models?id=${encodeURIComponent(agentId)}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!resp.ok) {
+      console.warn(`Failed to fetch dynamic models for ${agentId}: HTTP ${resp.status}`);
+      return [];
+    }
+    const data = await resp.json();
+    return Array.isArray(data.models) ? data.models : [];
+  } catch (err) {
+    console.warn(`Error fetching dynamic models for ${agentId}:`, err);
+    return [];
+  }
+}
+

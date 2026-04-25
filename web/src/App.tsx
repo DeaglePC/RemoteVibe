@@ -291,6 +291,23 @@ export default function App() {
   const handleOpenModelSheet = useCallback(() => setShowModelSheet(true), []);
   const handleCloseModelSheet = useCallback(() => setShowModelSheet(false), []);
 
+  const handleModelSelect = useCallback((modelId: string) => {
+    const store = useChatStore.getState();
+    const { activeAgentId, activeWorkDir, agentStatus } = store;
+
+    if (activeAgentId && activeWorkDir) {
+      if (agentStatus === 'running' || agentStatus === 'starting') {
+        handleStopAgent(activeAgentId);
+        // 给一点时间让之前的进程退出，再带着新模型启动
+        setTimeout(() => {
+          handleStartAgent(activeAgentId, activeWorkDir, { model: modelId });
+        }, 800);
+      } else {
+        handleStartAgent(activeAgentId, activeWorkDir, { model: modelId });
+      }
+    }
+  }, [handleStartAgent, handleStopAgent]);
+
   const handleLaunch = useCallback(() => {
     // 触发 TopBar 中的 launch 逻辑 — 通过 ref 或设置状态
     setShowLaunchTrigger((v) => v + 1);
@@ -554,7 +571,7 @@ export default function App() {
       {/* Model action sheet — 聊天输入栏齿轮打开 */}
       {showModelSheet && (
         <Suspense fallback={null}>
-          <ModelActionSheet open={showModelSheet} onClose={handleCloseModelSheet} />
+          <ModelActionSheet open={showModelSheet} onClose={handleCloseModelSheet} onModelSelect={handleModelSelect} />
         </Suspense>
       )}
     </div>

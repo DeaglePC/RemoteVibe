@@ -101,6 +101,7 @@ func NewServer(cfg *config.Config, mgr *agent.Manager) *Server {
 	mux.HandleFunc("/api/auth-status", s.handleAuthStatus)
 	mux.HandleFunc("/api/gemini-sessions", s.handleGeminiSessions)
 	mux.HandleFunc("/api/gemini-session-messages", s.handleGeminiSessionMessages)
+	mux.HandleFunc("/api/agent-models", s.handleAgentModels)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	// /ws/terminal 提供终端模式下的 shell 命令执行（流式输出）。
 	// 与 /ws 一样需要经过 corsMiddleware + authMiddleware（token 鉴权）保护。
@@ -160,12 +161,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth if no token configured
 		if s.cfg.Auth.Token == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// Health endpoint doesn't need auth
-		if r.URL.Path == "/api/health" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -837,6 +832,61 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 
 	data, _ := json.Marshal(map[string]interface{}{
 		"agents": results,
+	})
+	w.Write(data)
+}
+
+// handleAgentModels 返回指定 agent 支持的模型列表
+// GET: ?id=opencode
+func (s *Server) handleAgentModels(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	agentID := r.URL.Query().Get("id")
+	if agentID == "" {
+		http.Error(w, `{"error":"agent id is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	var agentCfg *config.AgentDef
+	for _, ag := range s.cfg.Agents {
+		if ag.ID == agentID {
+			agentCfg = &ag
+			break
+		}
+	}
+
+	if agentCfg == nil {
+		http.Error(w, `{"error":"agent not found"}`, http.StatusNotFound)
+		return
+	}
+
+	// 执行命令获取模型
+	cmd := exec.Command(agentCfg.Command, "models")
+	out, err := cmd.Output()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		errMsg, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("failed to execute command: %v", err)})
+		w.Write(errMsg)
+		return
+	}
+
+	// 假设输出是每行一个模型名字
+	lines := strings.Split(string(out), "\n")
+	var models []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			models = append(models, line)
+		}
+	}
+
+	data, _ := json.Marshal(map[string]interface{}{
+		"models": models,
 	})
 	w.Write(data)
 }

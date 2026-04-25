@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { inferAgentKind } from '../../types/protocol';
-import { getModelsForKind } from '../../types/models';
+import { getModelsForKind, ModelOption } from '../../types/models';
+import { fetchDynamicModels } from '../../stores/backendStore';
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  onModelSelect?: (modelId: string) => void;
 }
 
 /**
@@ -15,15 +17,39 @@ interface Props {
  * 说明：此处的选择不影响当前正在运行的 session，仅作为下次 `Launch` 的默认值。
  * 当前 agent 无可选模型时不渲染（外层应避免打开）。
  */
-export default function ModelActionSheet({ open, onClose }: Props) {
+export default function ModelActionSheet({ open, onClose, onModelSelect }: Props) {
   const activeAgentId = useChatStore((s) => s.activeAgentId);
   const defaultModel = useChatStore((s) => s.defaultModel);
   const setDefaultModel = useChatStore((s) => s.setDefaultModel);
   const agents = useChatStore((s) => s.agents);
 
   const kind = inferAgentKind(activeAgentId);
-  const models = getModelsForKind(kind);
   const activeAgent = agents.find((a) => a.id === activeAgentId);
+
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const staticModels = getModelsForKind(kind);
+    if (kind === 'opencode' && activeAgentId) {
+      setLoading(true);
+      fetchDynamicModels(activeAgentId).then((dynamicModelNames) => {
+        // 去重并合并
+        const existingIds = new Set(staticModels.map((m) => m.id));
+        const merged = [...staticModels];
+        for (const name of dynamicModelNames) {
+          if (!existingIds.has(name)) {
+            merged.push({ id: name, label: name, desc: 'Dynamic model' });
+          }
+        }
+        setModels(merged);
+        setLoading(false);
+      });
+    } else {
+      setModels(staticModels);
+    }
+  }, [open, kind, activeAgentId]);
 
   // Esc 关闭
   useEffect(() => {
@@ -45,6 +71,7 @@ export default function ModelActionSheet({ open, onClose }: Props) {
 
   const handleSelect = (id: string) => {
     setDefaultModel(id);
+    onModelSelect?.(id);
     onClose();
   };
 
@@ -104,7 +131,11 @@ export default function ModelActionSheet({ open, onClose }: Props) {
 
         {/* Model list */}
         <div className="flex-1 overflow-y-auto safe-bottom">
-          {models.length === 0 ? (
+          {loading ? (
+            <div className="px-4 py-6 text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>
+              <div className="animate-pulse">Loading dynamic models...</div>
+            </div>
+          ) : models.length === 0 ? (
             <div className="px-4 py-6 text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>
               No models available for this agent.
             </div>
