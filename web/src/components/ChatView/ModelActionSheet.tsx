@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { inferAgentKind } from '../../types/protocol';
-import { getModelsForKind, ModelOption } from '../../types/models';
+import { getModelsForKind } from '../../types/models';
+import type { ModelOption } from '../../types/models';
 import { fetchDynamicModels } from '../../stores/backendStore';
 
 interface Props {
