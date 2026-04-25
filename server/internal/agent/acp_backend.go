@@ -56,8 +56,14 @@ func (b *ACPBackend) Start(workDir string, sessionID string, model string) error
 	log.Printf("[ACPBackend] Building command: %s %v (workDir=%s, resumeSession=%s)",
 		b.def.Command, b.def.Args, workDir, sessionID)
 
+	args := make([]string, len(b.def.Args))
+	copy(args, b.def.Args)
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+
 	// 构建命令
-	b.cmd = exec.Command(b.def.Command, b.def.Args...)
+	b.cmd = exec.Command(b.def.Command, args...)
 	if workDir != "" {
 		b.cmd.Dir = workDir
 	}

@@ -1,6 +1,8 @@
 import type { AgentInfo } from '../types/protocol';
 import { inferAgentKind } from '../types/protocol';
-import { getModelsForKind } from '../types/models';
+import { getModelsForKind, ModelOption } from '../types/models';
+import { fetchDynamicModels } from '../stores/backendStore';
+import { useEffect, useState } from 'react';
 
 interface Props {
   open: boolean;
@@ -34,9 +36,31 @@ export default function SessionPickerModal({
   const folderName = workDir.split('/').pop() || workDir;
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
-  // 根据当前选中 agent 推断 kind，获取对应模型列表；无模型时隐藏列区
   const agentKind = inferAgentKind(selectedAgent?.id);
-  const availableModels = getModelsForKind(agentKind);
+
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const staticModels = getModelsForKind(agentKind);
+    if (agentKind === 'opencode' && selectedAgent?.id) {
+      setLoading(true);
+      fetchDynamicModels(selectedAgent.id).then((dynamicModelNames) => {
+        const existingIds = new Set(staticModels.map((m) => m.id));
+        const merged = [...staticModels];
+        for (const name of dynamicModelNames) {
+          if (!existingIds.has(name)) {
+            merged.push({ id: name, label: name, desc: 'Dynamic model' });
+          }
+        }
+        setAvailableModels(merged);
+        setLoading(false);
+      });
+    } else {
+      setAvailableModels(staticModels);
+    }
+  }, [open, agentKind, selectedAgent?.id]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -190,7 +214,7 @@ export default function SessionPickerModal({
             <div className="px-3 sm:px-4 pt-1">
               <div className="px-1 pb-1 text-xs font-medium uppercase tracking-wider"
                 style={{ color: 'var(--color-text-muted)' }}>
-                🤖 Model
+                🤖 Model {loading && <span className="animate-pulse lowercase ml-2">loading...</span>}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {availableModels.map((m) => {
