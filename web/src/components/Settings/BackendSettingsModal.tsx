@@ -25,6 +25,7 @@ const emptyForm: FormState = { name: '', apiUrl: '', apiKey: '' };
 export default function BackendSettingsModal({ open, onClose, onConnected }: Props) {
   const backends = useBackendStore((s) => s.backends);
   const activeBackendId = useBackendStore((s) => s.activeBackendId);
+  const statusMap = useBackendStore((s) => s.statusMap);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -257,81 +258,143 @@ export default function BackendSettingsModal({ open, onClose, onConnected }: Pro
 
               {backends.map((backend) => {
                 const isActive = backend.id === activeBackendId;
+                const health = statusMap[backend.id];
+                const agents = health?.agents;
                 return (
                   <div
                     key={backend.id}
-                    className="flex items-center gap-3 px-3 py-3 rounded-lg mb-2 transition-all group"
+                    className="flex flex-col gap-2 px-3 py-3 rounded-lg mb-2 transition-all"
                     style={{
                       background: isActive ? 'var(--color-surface-2)' : 'transparent',
                       border: isActive ? '1px solid var(--color-accent-500)' : '1px solid var(--color-border)',
                     }}
                   >
-                    {/* Active indicator */}
-                    <button
-                      onClick={() => handleSwitch(backend.id)}
-                      className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center cursor-pointer transition-all"
-                      style={{
-                        background: isActive ? 'var(--color-accent-500)' : 'transparent',
-                        border: isActive ? '2px solid var(--color-accent-500)' : '2px solid var(--color-text-muted)',
-                      }}
-                      title={isActive ? 'Active backend' : 'Switch to this backend'}
-                    >
-                      {isActive && (
-                        <div className="w-2 h-2 rounded-full" style={{ background: 'white' }} />
-                      )}
-                    </button>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
-                          {backend.name}
-                        </span>
+                    {/* 主行：选择按钮 + 信息 + 操作按钮 */}
+                    <div className="flex items-center gap-3">
+                      {/* Active indicator */}
+                      <button
+                        onClick={() => handleSwitch(backend.id)}
+                        className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center cursor-pointer transition-all"
+                        style={{
+                          background: isActive ? 'var(--color-accent-500)' : 'transparent',
+                          border: isActive ? '2px solid var(--color-accent-500)' : '2px solid var(--color-text-muted)',
+                        }}
+                        title={isActive ? 'Active backend' : 'Switch to this backend'}
+                      >
                         {isActive && (
-                          <span
-                            className="text-xs px-1.5 py-0.5 rounded-full"
-                            style={{
-                              background: 'var(--color-accent-500)',
-                              color: 'white',
-                              fontSize: '0.6rem',
-                            }}
-                          >
-                            ACTIVE
-                          </span>
+                          <div className="w-2 h-2 rounded-full" style={{ background: 'white' }} />
                         )}
+                      </button>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
+                            {backend.name}
+                          </span>
+                          {isActive && (
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0"
+                              style={{
+                                background: 'var(--color-accent-500)',
+                                color: 'white',
+                                fontSize: '0.6rem',
+                              }}
+                            >
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs truncate mt-0.5" style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+                          {backend.apiUrl}
+                        </div>
+                        <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                          {backend.apiKey ? '🔑 Key configured' : '🔓 No API key'}
+                        </div>
                       </div>
-                      <div className="text-xs truncate mt-0.5" style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                        {backend.apiUrl}
-                      </div>
-                      <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-                        {backend.apiKey ? '🔑 Key configured' : '🔓 No API key'}
+
+                      {/* Actions — 常驻显示，适配手机触摸 */}
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => handleEdit(backend)}
+                          className="flex items-center justify-center rounded-lg cursor-pointer transition-all active:scale-95"
+                          style={{
+                            background: 'var(--color-surface-3)',
+                            color: 'var(--color-text-secondary)',
+                            border: 'none',
+                            width: 44,
+                            height: 44,
+                          }}
+                          title="Edit"
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDelete(backend.id)}
+                          className="flex items-center justify-center rounded-lg cursor-pointer transition-all active:scale-95"
+                          style={{
+                            background: 'var(--color-surface-3)',
+                            color: 'var(--color-danger)',
+                            border: 'none',
+                            width: 44,
+                            height: 44,
+                          }}
+                          title="Delete"
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => handleEdit(backend)}
-                        className="p-1.5 rounded-lg cursor-pointer transition-all hover:opacity-80"
-                        style={{ background: 'var(--color-surface-3)', color: 'var(--color-text-secondary)', border: 'none' }}
-                        title="Edit"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={() => handleDelete(backend.id)}
-                        className="p-1.5 rounded-lg cursor-pointer transition-all hover:opacity-80"
-                        style={{ background: 'var(--color-surface-3)', color: 'var(--color-danger)', border: 'none' }}
-                        title="Delete"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                        </svg>
-                      </button>
-                    </div>
+                    {/* Agent 可用性标签行 */}
+                    {agents && agents.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pl-8">
+                        {agents.map((ag) => (
+                          <span
+                            key={ag.id}
+                            className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+                            style={{
+                              background: ag.available
+                                ? 'oklch(0.72 0.18 155 / 0.12)'
+                                : 'oklch(0.5 0 0 / 0.1)',
+                              color: ag.available
+                                ? 'var(--color-success)'
+                                : 'var(--color-text-muted)',
+                              border: `1px solid ${
+                                ag.available
+                                  ? 'oklch(0.72 0.18 155 / 0.3)'
+                                  : 'oklch(0.5 0 0 / 0.2)'
+                              }`,
+                              fontSize: '0.68rem',
+                            }}
+                            title={ag.available ? `${ag.name} is installed` : `${ag.name} not found in PATH`}
+                          >
+                            <span
+                              style={{
+                                width: 5,
+                                height: 5,
+                                borderRadius: '50%',
+                                background: ag.available ? 'var(--color-success)' : 'var(--color-text-muted)',
+                                display: 'inline-block',
+                                flexShrink: 0,
+                              }}
+                            />
+                            {ag.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {/* 未检测时的提示 */}
+                    {!agents && health?.state === 'online' && (
+                      <div className="pl-8">
+                        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>检测中...</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -191,7 +192,31 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"ok"}`))
+
+	type agentInfo struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Mode      string `json:"mode"`
+		Available bool   `json:"available"`
+	}
+
+	agents := make([]agentInfo, 0, len(s.cfg.Agents))
+	for _, ag := range s.cfg.Agents {
+		_, err := exec.LookPath(ag.Command)
+		agents = append(agents, agentInfo{
+			ID:        ag.ID,
+			Name:      ag.Name,
+			Mode:      ag.Mode,
+			Available: err == nil,
+		})
+	}
+
+	resp := map[string]interface{}{
+		"status": "ok",
+		"agents": agents,
+	}
+	data, _ := json.Marshal(resp)
+	w.Write(data)
 }
 
 // FileEntry 表示目录中的文件或子目录信息

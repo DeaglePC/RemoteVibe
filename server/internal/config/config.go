@@ -72,6 +72,13 @@ func Default() *Config {
 				Args:    []string{"--quiet"},
 				Mode:    "cli",
 			},
+			{
+				ID:      "opencode",
+				Name:    "OpenCode (ACP)",
+				Command: "opencode",
+				Args:    []string{"acp"},
+				Mode:    "acp",
+			},
 		},
 	}
 }

@@ -10,6 +10,14 @@ export interface BackendConfig {
   apiKey: string;  // 认证 API Key
 }
 
+/** 后端返回的单个 Agent 信息 */
+export interface AgentInfo {
+  id: string;
+  name: string;
+  mode: string;      // 'acp' | 'cli'
+  available: boolean; // 命令是否在远程 PATH 中找到
+}
+
 /** 单台后端的在线状态（P5：多机器管理优化） */
 export type BackendHealthState = 'unknown' | 'checking' | 'online' | 'offline';
 
@@ -18,6 +26,7 @@ export interface BackendHealth {
   latencyMs?: number;
   lastCheckedAt?: number;
   message?: string;
+  agents?: AgentInfo[]; // 该后端上的可用 agent 列表
 }
 
 interface BackendState {
@@ -250,10 +259,21 @@ export async function pingBackend(id: string, timeoutMs = 5000): Promise<boolean
     });
     const latencyMs = Date.now() - startedAt;
     if (resp.ok) {
+      // 解析 agents 列表（新版后端在 health 响应里带上）
+      let agents: AgentInfo[] | undefined;
+      try {
+        const data = await resp.json();
+        if (Array.isArray(data.agents)) {
+          agents = data.agents as AgentInfo[];
+        }
+      } catch {
+        // 旧版后端不带 agents，忽略解析错误
+      }
       useBackendStore.getState().setBackendStatus(id, {
         state: 'online',
         latencyMs,
         lastCheckedAt: Date.now(),
+        agents,
       });
       return true;
     }
