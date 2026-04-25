@@ -106,6 +106,7 @@ type InitializeResult struct {
 type SessionNewParams struct {
 	Cwd        string        `json:"cwd"`
 	McpServers []interface{} `json:"mcpServers"`
+	Model      string        `json:"model,omitempty"`
 }
 
 type SessionNewResult struct {
@@ -117,6 +118,7 @@ type SessionLoadParams struct {
 	SessionID  string        `json:"sessionId"`
 	Cwd        string        `json:"cwd"`
 	McpServers []interface{} `json:"mcpServers"`
+	Model      string        `json:"model,omitempty"`
 }
 
 // SessionLoadResult 是 session/load 请求的响应

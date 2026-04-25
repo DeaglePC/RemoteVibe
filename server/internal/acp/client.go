@@ -127,10 +127,11 @@ func (c *Client) SupportsLoadSession() bool {
 }
 
 // SessionNew creates a new conversation session
-func (c *Client) SessionNew(cwd string) (string, error) {
+func (c *Client) SessionNew(cwd string, model string) (string, error) {
 	params := SessionNewParams{
 		Cwd:        cwd,
 		McpServers: []interface{}{},
+		Model:      model,
 	}
 	result, err := c.sendRequest("session/new", params)
 	if err != nil {
@@ -148,7 +149,7 @@ func (c *Client) SessionNew(cwd string) (string, error) {
 }
 
 // SessionLoad 恢复一个已有的 Gemini CLI 会话
-func (c *Client) SessionLoad(sessionID string, cwd string) (string, error) {
+func (c *Client) SessionLoad(sessionID string, cwd string, model string) (string, error) {
 	if !c.supportsLoadSession {
 		return "", fmt.Errorf("agent does not support session/load")
 	}
@@ -157,6 +158,7 @@ func (c *Client) SessionLoad(sessionID string, cwd string) (string, error) {
 		SessionID:  sessionID,
 		Cwd:        cwd,
 		McpServers: []interface{}{},
+		Model:      model,
 	}
 	result, err := c.sendRequest("session/load", params)
 	if err != nil {

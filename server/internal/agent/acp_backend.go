@@ -56,14 +56,8 @@ func (b *ACPBackend) Start(workDir string, sessionID string, model string) error
 	log.Printf("[ACPBackend] Building command: %s %v (workDir=%s, resumeSession=%s)",
 		b.def.Command, b.def.Args, workDir, sessionID)
 
-	args := make([]string, len(b.def.Args))
-	copy(args, b.def.Args)
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-
 	// 构建命令
-	b.cmd = exec.Command(b.def.Command, args...)
+	b.cmd = exec.Command(b.def.Command, b.def.Args...)
 	if workDir != "" {
 		b.cmd.Dir = workDir
 	}
@@ -140,10 +134,10 @@ func (b *ACPBackend) Start(workDir string, sessionID string, model string) error
 	// 恢复或创建会话
 	if sessionID != "" && b.client.SupportsLoadSession() {
 		log.Printf("[ACPBackend] Loading session %s (cwd=%s)...", sessionID, sessionCwd)
-		sid, err := b.client.SessionLoad(sessionID, sessionCwd)
+		sid, err := b.client.SessionLoad(sessionID, sessionCwd, model)
 		if err != nil {
 			log.Printf("[ACPBackend] Failed to load session %s, falling back to new: %v", sessionID, err)
-			sid, err = b.client.SessionNew(sessionCwd)
+			sid, err = b.client.SessionNew(sessionCwd, model)
 			if err != nil {
 				b.Stop()
 				return fmt.Errorf("ACP session/new fallback: %w", err)
@@ -154,7 +148,7 @@ func (b *ACPBackend) Start(workDir string, sessionID string, model string) error
 		}
 	} else {
 		log.Printf("[ACPBackend] Creating new session (cwd=%s)...", sessionCwd)
-		sid, err := b.client.SessionNew(sessionCwd)
+		sid, err := b.client.SessionNew(sessionCwd, model)
 		if err != nil {
 			b.Stop()
 			return fmt.Errorf("ACP session/new: %w", err)
