@@ -1,6 +1,7 @@
 import type { AgentInfo } from '../types/protocol';
 import { inferAgentKind } from '../types/protocol';
-import { getModelsForKind, ModelOption } from '../types/models';
+import { getModelsForKind } from '../types/models';
+import type { ModelOption } from '../types/models';
 import { fetchDynamicModels } from '../stores/backendStore';
 import { useEffect, useState } from 'react';
 
