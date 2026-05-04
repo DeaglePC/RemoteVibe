@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -207,8 +208,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"status": "ok",
-		"agents": agents,
+		"status":            "ok",
+		"agents":            agents,
+		"platform":          runtime.GOOS,
+		"terminalSupported": runtime.GOOS != "windows",
 	}
 	data, _ := json.Marshal(resp)
 	w.Write(data)

@@ -27,6 +27,8 @@ export interface BackendHealth {
   lastCheckedAt?: number;
   message?: string;
   agents?: AgentInfo[]; // 该后端上的可用 agent 列表
+  platform?: string;    // 服务端操作系统，如 'windows', 'linux', 'darwin'
+  terminalSupported?: boolean; // 服务端是否支持终端（Windows 不支持）
 }
 
 interface BackendState {
@@ -259,21 +261,31 @@ export async function pingBackend(id: string, timeoutMs = 5000): Promise<boolean
     });
     const latencyMs = Date.now() - startedAt;
     if (resp.ok) {
-      // 解析 agents 列表（新版后端在 health 响应里带上）
+      // 解析 health 响应（agents / platform / terminalSupported 等字段）
       let agents: AgentInfo[] | undefined;
+      let platform: string | undefined;
+      let terminalSupported: boolean | undefined;
       try {
         const data = await resp.json();
         if (Array.isArray(data.agents)) {
           agents = data.agents as AgentInfo[];
         }
+        if (typeof data.platform === 'string') {
+          platform = data.platform;
+        }
+        if (typeof data.terminalSupported === 'boolean') {
+          terminalSupported = data.terminalSupported;
+        }
       } catch {
-        // 旧版后端不带 agents，忽略解析错误
+        // 旧版后端不带额外字段，忽略解析错误
       }
       useBackendStore.getState().setBackendStatus(id, {
         state: 'online',
         latencyMs,
         lastCheckedAt: Date.now(),
         agents,
+        platform,
+        terminalSupported,
       });
       return true;
     }
@@ -328,3 +340,44 @@ export async function fetchDynamicModels(agentId: string): Promise<string[]> {
   }
 }
 
+/**
+ * 检查当前活跃后端是否支持终端功能。
+ *
+ * 优先从 statusMap 缓存读取（已通过 pingBackend 拿到的 terminalSupported 字段）；
+ * 若无缓存（如本地模式、未 ping 过），则实时调用 /api/health 查询。
+ *
+ * 返回 true 表示支持，false 表示不支持（如 Windows 服务端）。
+ * 出错时返回 true（允许尝试连接，由 WS 层面的 501 做兜底拦截）。
+ */
+export async function checkTerminalSupported(): Promise<boolean> {
+  const store = useBackendStore.getState();
+  const active = store.getActiveBackend();
+
+  // 如果有已配置后端且 statusMap 中已缓存了 terminalSupported
+  if (active) {
+    const health = store.statusMap[active.id];
+    if (health && typeof health.terminalSupported === 'boolean') {
+      return health.terminalSupported;
+    }
+  }
+
+  // 无缓存或本地模式：实时请求 /api/health
+  try {
+    const baseUrl = getApiBaseUrl();
+    const headers = getAuthHeaders();
+    const resp = await fetch(`${baseUrl}/api/health`, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(3000),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (typeof data.terminalSupported === 'boolean') {
+        return data.terminalSupported;
+      }
+    }
+  } catch {
+    // 网络异常，允许尝试（兜底由 WS 501 拦截）
+  }
+  return true;
+}

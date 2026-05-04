@@ -455,7 +455,20 @@ export default function InputBar({ onSend, onSlashCommand, onOpenModelSheet, dis
               className="p-1.5 rounded-lg transition-all duration-150 hover:bg-[color:var(--color-surface-2)] active:scale-95 cursor-pointer"
               style={{ color: 'var(--color-text-muted)', background: 'transparent', border: 'none' }}
               title="进入终端模式（执行 shell 命令）"
-              onClick={() => setTerminalMode(true)}
+              onClick={async () => {
+                const { checkTerminalSupported } = await import('../../stores/backendStore');
+                const supported = await checkTerminalSupported();
+                if (!supported) {
+                  useChatStore.getState().addMessage({
+                    id: `msg_${Date.now()}`,
+                    role: 'system',
+                    content: '⚠️ 当前服务端为 Windows 系统，暂不支持终端功能。',
+                    timestamp: Date.now(),
+                  });
+                  return;
+                }
+                setTerminalMode(true);
+              }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="4 17 10 11 4 5" />
